@@ -12,17 +12,45 @@
 <header class="topbar">
   <div class="topbar-left">
     <span class="logo">⬡ SecWorkflow</span>
-    <span class="version">v1.0</span>
   </div>
-  <div class="topbar-center" id="topbar-breadcrumb">
+  <div class="topbar-center">
     <span class="breadcrumb-module" id="breadcrumb-text">Select a module</span>
   </div>
   <div class="topbar-right">
-    <button class="btn btn-ghost" id="btn-filter-toggle" title="Toggle filters">⚙ Filters</button>
-    <button class="btn btn-ghost" id="btn-import" title="Import JSON">↑ Import</button>
-    <button class="btn btn-ghost" id="btn-export-json" title="Export JSON">↓ JSON</button>
-    <button class="btn btn-ghost" id="btn-export-md" title="Export Markdown">↓ MD</button>
-    <button class="btn btn-primary" id="btn-report" title="Generate Report">⬚ Report</button>
+    <button class="btn btn-ghost-top" id="btn-filter-toggle" title="Toggle filters">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1 0-1zm2 4h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1 0-1zm2 4h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1 0-1z"/></svg>
+      Filters
+    </button>
+
+    <!-- Data dropdown -->
+    <div class="topbar-dropdown-wrap" id="data-menu-wrap">
+      <button class="btn btn-ghost-top" id="btn-data-menu" title="Import / Export data">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M9.5 0a.5.5 0 0 1 .5.5v4H13a.5.5 0 0 1 .354.854l-5 5a.5.5 0 0 1-.708 0l-5-5A.5.5 0 0 1 3 4.5h3V.5a.5.5 0 0 1 .5-.5h3zm-1 .5v4H5.5a.5.5 0 0 0-.354.854L8 8.207l2.854-2.853A.5.5 0 0 0 10.5 4.5H8V.5h.5zM.5 11.5a.5.5 0 0 0 0 1h15a.5.5 0 0 0 0-1H.5zm0 2a.5.5 0 0 0 0 1h15a.5.5 0 0 0 0-1H.5z"/></svg>
+        Data
+      </button>
+      <div class="topbar-dropdown" id="data-menu">
+        <button class="dropdown-item" id="btn-import">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a.5.5 0 0 1 .5.5v6.793l2.146-2.147a.5.5 0 0 1 .708.708l-3 3a.5.5 0 0 1-.708 0l-3-3a.5.5 0 0 1 .708-.708L7.5 8.293V1.5A.5.5 0 0 1 8 1zM1 14.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1H1.5a.5.5 0 0 1-.5-.5z"/></svg>
+          Import JSON
+        </button>
+        <button class="dropdown-item" id="btn-export-json">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M8 15a.5.5 0 0 0 .5-.5V8.707l2.146 2.147a.5.5 0 0 0 .708-.708l-3-3a.5.5 0 0 0-.708 0l-3 3a.5.5 0 0 0 .708.708L7.5 8.707V14.5a.5.5 0 0 0 .5.5zM1 1.5a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 0-1H1.5a.5.5 0 0 0-.5.5z"/></svg>
+          Export JSON
+        </button>
+        <div class="dropdown-divider"></div>
+        <button class="dropdown-item" id="btn-export-md">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/></svg>
+          Export Module MD
+        </button>
+      </div>
+    </div>
+
+    <div class="topbar-divider"></div>
+
+    <button class="btn btn-report-top" id="btn-report" title="Generate PDF Report">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/></svg>
+      Export Report
+    </button>
     <input type="file" id="import-file-input" accept=".json" style="display:none" />
   </div>
 </header>
@@ -63,10 +91,9 @@
     <input type="text" id="filter-search" placeholder="Title, description…" />
   </div>
   <div class="filter-group">
-    <label>Show</label>
     <label class="toggle-label"><input type="checkbox" id="filter-findings-only" /> Findings only</label>
   </div>
-  <button class="btn btn-ghost btn-sm" id="btn-filter-clear">Clear</button>
+  <button class="btn btn-ghost-top btn-sm" id="btn-filter-clear">Clear</button>
 </div>
 
 <!-- ── MAIN LAYOUT ────────────────────────────────────────────────────── -->
@@ -74,14 +101,21 @@
 
   <!-- SIDEBAR -->
   <aside class="sidebar">
-    <!-- Project meta -->
-    <div class="sidebar-project" id="sidebar-project">
-      <div class="project-icon">📋</div>
-      <div class="project-info">
-        <div class="project-name" id="project-name-display" contenteditable="true" title="Click to edit project name">Untitled Project</div>
-        <div class="project-client" id="project-client-display" contenteditable="true" title="Click to edit client">Client</div>
+
+    <!-- Project card -->
+    <div class="sidebar-project-card" id="sidebar-project">
+      <div class="project-card-body">
+        <div class="project-card-name" id="project-name-display">Untitled Project</div>
+        <div class="project-card-meta">
+          <span class="project-card-client" id="project-client-display">Client</span>
+          <span class="project-card-sep">·</span>
+          <span class="project-card-classification" id="project-classification-display">CONFIDENTIAL</span>
+        </div>
+        <div class="project-card-dates" id="project-dates-display"></div>
       </div>
-      <button class="btn-icon" id="btn-project-meta" title="Edit project metadata">✎</button>
+      <button class="project-edit-btn" id="btn-project-meta" title="Edit project details">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11l.178-.178z"/></svg>
+      </button>
     </div>
 
     <!-- Progress overview -->
@@ -126,7 +160,7 @@
         <div class="welcome-card">
           <div class="wc-icon">📄</div>
           <div class="wc-title">Reports</div>
-          <div class="wc-desc">Generate PDF-ready HTML or Markdown reports</div>
+          <div class="wc-desc">Generate print-ready PDF reports</div>
         </div>
       </div>
     </div>
@@ -143,82 +177,138 @@
 
 <!-- Project Metadata Modal -->
 <div class="modal-overlay" id="modal-project" style="display:none">
-  <div class="modal">
+  <div class="modal modal-project-modal">
     <div class="modal-header">
-      <h2>Project Metadata</h2>
+      <div class="modal-header-icon">📋</div>
+      <div>
+        <h2>Project Details</h2>
+        <p class="modal-subtitle">This information appears on the cover page of your report.</p>
+      </div>
       <button class="modal-close" data-modal="modal-project">✕</button>
     </div>
     <div class="modal-body">
+      <div class="meta-section-label">Engagement</div>
       <div class="form-grid">
-        <div class="form-group"><label>Project Name</label><input type="text" id="meta-project-name" placeholder="Internal Pentest Q2-2025" /></div>
-        <div class="form-group"><label>Client</label><input type="text" id="meta-client" placeholder="Acme Corp" /></div>
-        <div class="form-group"><label>Assessor(s)</label><input type="text" id="meta-assessor" placeholder="J. Smith, A. Lee" /></div>
-        <div class="form-group"><label>Classification</label>
-          <select id="meta-classification">
-            <option>CONFIDENTIAL</option>
-            <option>TLP:RED</option>
-            <option>TLP:AMBER</option>
-            <option>TLP:GREEN</option>
-            <option>INTERNAL</option>
-          </select>
+        <div class="form-group form-full">
+          <label>Project Name</label>
+          <input type="text" id="meta-project-name" placeholder="e.g. Internal Pentest Q2-2025" />
         </div>
-        <div class="form-group"><label>Start Date</label><input type="date" id="meta-start-date" /></div>
-        <div class="form-group"><label>End Date</label><input type="date" id="meta-end-date" /></div>
-        <div class="form-group form-full"><label>Scope</label><textarea id="meta-scope" rows="3" placeholder="IP ranges, domains, applications in scope…"></textarea></div>
-        <div class="form-group form-full"><label>Exclusions</label><textarea id="meta-exclusions" rows="2" placeholder="Out-of-scope systems, restricted actions…"></textarea></div>
+        <div class="form-group">
+          <label>Client / Organisation</label>
+          <input type="text" id="meta-client" placeholder="e.g. Acme Corp S.A." />
+        </div>
+        <div class="form-group">
+          <label>Assessor(s)</label>
+          <input type="text" id="meta-assessor" placeholder="e.g. J. Smith, A. Lee" />
+        </div>
+        <div class="form-group">
+          <label>Start Date</label>
+          <input type="date" id="meta-start-date" />
+        </div>
+        <div class="form-group">
+          <label>End Date</label>
+          <input type="date" id="meta-end-date" />
+        </div>
+      </div>
+
+      <div class="meta-section-label" style="margin-top:20px">Classification & Scope</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Classification</label>
+          <div class="classification-picker" id="classification-picker">
+            <button class="classif-btn active" data-value="CONFIDENTIAL">CONFIDENTIAL</button>
+            <button class="classif-btn" data-value="TLP:RED">TLP:RED</button>
+            <button class="classif-btn" data-value="TLP:AMBER">TLP:AMBER</button>
+            <button class="classif-btn" data-value="TLP:GREEN">TLP:GREEN</button>
+            <button class="classif-btn" data-value="INTERNAL">INTERNAL</button>
+          </div>
+          <input type="hidden" id="meta-classification" value="CONFIDENTIAL" />
+        </div>
+        <div class="form-group">
+          <label>Report Version</label>
+          <input type="text" id="meta-version" placeholder="1.0" value="1.0" />
+        </div>
+        <div class="form-group form-full">
+          <label>Scope</label>
+          <textarea id="meta-scope" rows="3" placeholder="IP ranges, domains, and applications in scope…"></textarea>
+        </div>
+        <div class="form-group form-full">
+          <label>Exclusions</label>
+          <textarea id="meta-exclusions" rows="2" placeholder="Out-of-scope systems or restricted actions…"></textarea>
+        </div>
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-ghost" data-modal="modal-project">Cancel</button>
-      <button class="btn btn-primary" id="btn-save-meta">Save</button>
+      <button class="btn btn-ghost-modal" data-modal="modal-project">Cancel</button>
+      <button class="btn btn-primary-modal" id="btn-save-meta">Save details</button>
     </div>
   </div>
 </div>
 
-<!-- Report Modal -->
+<!-- Report Export Modal -->
 <div class="modal-overlay" id="modal-report" style="display:none">
-  <div class="modal modal-wide">
+  <div class="modal modal-report-modal">
     <div class="modal-header">
-      <h2>Generate Report</h2>
+      <div class="modal-header-icon">📄</div>
+      <div>
+        <h2>Export Report</h2>
+        <p class="modal-subtitle">Generates a print-ready document — open and use Print → Save as PDF.</p>
+      </div>
       <button class="modal-close" data-modal="modal-report">✕</button>
     </div>
     <div class="modal-body">
-      <div class="report-options">
-        <div class="form-group">
-          <label>Report Type</label>
-          <select id="report-type">
-            <option value="pentest">Pentest Report (Technical)</option>
-            <option value="consultant">Consulting Report (Compliance)</option>
-            <option value="executive">Executive Summary</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Include modules</label>
-          <div id="report-module-checkboxes" class="checkbox-list"></div>
-        </div>
-        <div class="form-group">
-          <label>Include items with status</label>
-          <div class="checkbox-list">
-            <label><input type="checkbox" class="report-status-filter" value="vulnerable" checked /> Vulnerable / Gap</label>
-            <label><input type="checkbox" class="report-status-filter" value="in-progress" checked /> In Progress</label>
-            <label><input type="checkbox" class="report-status-filter" value="not-vulnerable" /> Not Vulnerable / Compliant</label>
-            <label><input type="checkbox" class="report-status-filter" value="cannot-verify" checked /> Cannot Verify</label>
+      <div class="report-config-grid">
+
+        <div class="report-config-section">
+          <div class="rcs-label">Report type</div>
+          <div class="report-type-cards" id="report-type-cards">
+            <label class="report-type-card active">
+              <input type="radio" name="report-type" value="pentest" checked />
+              <div class="rtc-icon">🔴</div>
+              <div class="rtc-name">Pentest</div>
+              <div class="rtc-desc">Technical findings report with evidence, severity ratings, and remediation</div>
+            </label>
+            <label class="report-type-card">
+              <input type="radio" name="report-type" value="consultant" />
+              <div class="rtc-icon">📊</div>
+              <div class="rtc-name">Compliance</div>
+              <div class="rtc-desc">Compliance gap report with control status matrix and recommendations</div>
+            </label>
+            <label class="report-type-card">
+              <input type="radio" name="report-type" value="executive">
+              <div class="rtc-icon">📋</div>
+              <div class="rtc-name">Executive</div>
+              <div class="rtc-desc">Non-technical summary with risk overview for management</div>
+            </label>
           </div>
         </div>
-        <div class="form-group">
-          <label><input type="checkbox" id="report-findings-only" /> Findings only (items with notes or promoted findings)</label>
+
+        <div class="report-config-row">
+          <div class="report-config-section half">
+            <div class="rcs-label">Include modules</div>
+            <div id="report-module-checkboxes" class="checkbox-list scrollable"></div>
+          </div>
+          <div class="report-config-section half">
+            <div class="rcs-label">Include statuses</div>
+            <div class="checkbox-list">
+              <label class="cb-label"><input type="checkbox" class="report-status-filter" value="vulnerable" checked /><span class="cb-dot" style="background:#ef4444"></span>Vulnerable / Gap</label>
+              <label class="cb-label"><input type="checkbox" class="report-status-filter" value="in-progress" checked /><span class="cb-dot" style="background:#3b82f6"></span>In Progress</label>
+              <label class="cb-label"><input type="checkbox" class="report-status-filter" value="cannot-verify" checked /><span class="cb-dot" style="background:#f59e0b"></span>Cannot Verify</label>
+              <label class="cb-label"><input type="checkbox" class="report-status-filter" value="not-vulnerable" /><span class="cb-dot" style="background:#10b981"></span>Not Vulnerable / Compliant</label>
+            </div>
+            <div class="rcs-label" style="margin-top:16px">Options</div>
+            <label class="cb-label"><input type="checkbox" id="report-findings-only" /><span>Findings with notes only</span></label>
+          </div>
         </div>
-      </div>
-      <div class="report-preview" id="report-preview">
-        <p class="preview-placeholder">Configure options above and click Generate.</p>
+
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-ghost" data-modal="modal-report">Close</button>
-      <button class="btn btn-ghost" id="btn-copy-report">⎘ Copy</button>
-      <button class="btn btn-ghost" id="btn-download-report-md">↓ Markdown</button>
-      <button class="btn btn-primary" id="btn-generate-report">Generate</button>
-      <button class="btn btn-primary" id="btn-print-report">🖶 Print / PDF</button>
+      <button class="btn btn-ghost-modal" data-modal="modal-report">Cancel</button>
+      <button class="btn btn-primary-modal" id="btn-generate-report">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5z"/></svg>
+        Open Report
+      </button>
     </div>
   </div>
 </div>
@@ -227,63 +317,82 @@
 <div class="panel-overlay" id="panel-overlay" style="display:none"></div>
 <div class="item-panel" id="item-panel" style="display:none">
   <div class="panel-header">
-    <div class="panel-title" id="panel-title"></div>
+    <div class="panel-header-inner">
+      <div class="panel-title" id="panel-title"></div>
+      <div class="panel-header-meta" id="panel-header-meta"></div>
+    </div>
     <button class="panel-close" id="panel-close">✕</button>
   </div>
   <div class="panel-body">
-    <div class="panel-section">
-      <label class="panel-label">Status</label>
-      <select class="status-select panel-status" id="panel-status"></select>
+    <div class="panel-row-two">
+      <div class="panel-section">
+        <label class="panel-label">Status</label>
+        <select class="panel-status" id="panel-status"></select>
+      </div>
+      <div class="panel-section">
+        <label class="panel-label">Severity</label>
+        <select id="panel-severity">
+          <option value="">— Default —</option>
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+          <option value="info">Info</option>
+        </select>
+      </div>
     </div>
-    <div class="panel-section">
-      <label class="panel-label">Severity Override</label>
-      <select id="panel-severity">
-        <option value="">— Use default —</option>
-        <option value="critical">Critical</option>
-        <option value="high">High</option>
-        <option value="medium">Medium</option>
-        <option value="low">Low</option>
-        <option value="info">Info</option>
-      </select>
-    </div>
+
     <div class="panel-section">
       <label class="panel-label">Description</label>
       <p class="panel-description" id="panel-description"></p>
     </div>
+
     <div class="panel-section">
       <label class="panel-label">Notes / Observations</label>
-      <textarea id="panel-notes" rows="5" placeholder="Technical observations, test results, screenshots references…"></textarea>
+      <textarea id="panel-notes" rows="5" placeholder="What did you find? Tool output summary, affected systems, impact…"></textarea>
     </div>
+
     <div class="panel-section">
       <label class="panel-label">Evidence</label>
-      <textarea id="panel-evidence" rows="3" placeholder="Paste tool output, command, screenshot paths…"></textarea>
+      <textarea id="panel-evidence" rows="3" placeholder="Paste command output, screenshot path, request/response…" class="mono-textarea"></textarea>
     </div>
+
     <div class="panel-section">
-      <label class="panel-label">Remediation</label>
-      <textarea id="panel-remediation" rows="3" placeholder="Override or supplement default remediation…"></textarea>
+      <label class="panel-label">Remediation Notes</label>
+      <textarea id="panel-remediation" rows="3" placeholder="Override or supplement the default remediation…"></textarea>
     </div>
-    <div class="panel-section">
-      <label class="panel-label">Tags</label>
-      <div class="panel-tags" id="panel-tags"></div>
-    </div>
-    <div class="panel-section">
-      <label class="panel-label">Framework Mappings</label>
-      <div class="panel-frameworks" id="panel-frameworks"></div>
-    </div>
+
     <div class="panel-section">
       <label class="panel-label">Default Remediation</label>
       <p class="panel-description muted" id="panel-default-remediation"></p>
     </div>
-    <div class="panel-section panel-actions">
-      <label class="toggle-label">
+
+    <div class="panel-section">
+      <label class="panel-label">Tags</label>
+      <div class="panel-tags" id="panel-tags"></div>
+    </div>
+
+    <div class="panel-section">
+      <label class="panel-label">Framework References</label>
+      <div class="panel-frameworks" id="panel-frameworks"></div>
+    </div>
+
+    <div class="panel-finding-toggle">
+      <label class="finding-toggle-label">
         <input type="checkbox" id="panel-is-finding" />
-        <span>Promote to Finding</span>
+        <div class="finding-toggle-inner">
+          <span class="finding-toggle-icon">🔍</span>
+          <div>
+            <div class="finding-toggle-title">Promote to Finding</div>
+            <div class="finding-toggle-sub">Highlights this item in the report and sidebar</div>
+          </div>
+        </div>
       </label>
     </div>
   </div>
   <div class="panel-footer">
-    <button class="btn btn-ghost" id="panel-close-btn">Close</button>
-    <button class="btn btn-primary" id="panel-save-btn">Save</button>
+    <button class="btn btn-ghost-modal" id="panel-close-btn">Discard</button>
+    <button class="btn btn-primary-modal" id="panel-save-btn">Save</button>
   </div>
 </div>
 
