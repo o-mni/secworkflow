@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SecWorkflow — Pentest & Consulting Checklist</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<!-- ── TOP BAR ─────────────────────────────────────────────────────────── -->
+<header class="topbar">
+  <div class="topbar-left">
+    <span class="logo">⬡ SecWorkflow</span>
+    <span class="version">v1.0</span>
+  </div>
+  <div class="topbar-center" id="topbar-breadcrumb">
+    <span class="breadcrumb-module" id="breadcrumb-text">Select a module</span>
+  </div>
+  <div class="topbar-right">
+    <button class="btn btn-ghost" id="btn-filter-toggle" title="Toggle filters">⚙ Filters</button>
+    <button class="btn btn-ghost" id="btn-import" title="Import JSON">↑ Import</button>
+    <button class="btn btn-ghost" id="btn-export-json" title="Export JSON">↓ JSON</button>
+    <button class="btn btn-ghost" id="btn-export-md" title="Export Markdown">↓ MD</button>
+    <button class="btn btn-primary" id="btn-report" title="Generate Report">⬚ Report</button>
+    <input type="file" id="import-file-input" accept=".json" style="display:none" />
+  </div>
+</header>
+
+<!-- ── FILTER BAR ──────────────────────────────────────────────────────── -->
+<div class="filter-bar" id="filter-bar" style="display:none">
+  <div class="filter-group">
+    <label>Status</label>
+    <select id="filter-status">
+      <option value="all">All</option>
+      <option value="not-started">Not Started</option>
+      <option value="in-progress">In Progress</option>
+      <option value="not-vulnerable">Not Vulnerable / Compliant</option>
+      <option value="vulnerable">Vulnerable / Gap</option>
+      <option value="not-in-scope">Not in Scope</option>
+      <option value="cannot-verify">Cannot Verify</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Severity</label>
+    <select id="filter-severity">
+      <option value="all">All</option>
+      <option value="critical">Critical</option>
+      <option value="high">High</option>
+      <option value="medium">Medium</option>
+      <option value="low">Low</option>
+      <option value="info">Info</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Tag</label>
+    <select id="filter-tag">
+      <option value="all">All Tags</option>
+    </select>
+  </div>
+  <div class="filter-group filter-search">
+    <label>Search</label>
+    <input type="text" id="filter-search" placeholder="Title, description…" />
+  </div>
+  <div class="filter-group">
+    <label>Show</label>
+    <label class="toggle-label"><input type="checkbox" id="filter-findings-only" /> Findings only</label>
+  </div>
+  <button class="btn btn-ghost btn-sm" id="btn-filter-clear">Clear</button>
+</div>
+
+<!-- ── MAIN LAYOUT ────────────────────────────────────────────────────── -->
+<div class="layout">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <!-- Project meta -->
+    <div class="sidebar-project" id="sidebar-project">
+      <div class="project-icon">📋</div>
+      <div class="project-info">
+        <div class="project-name" id="project-name-display" contenteditable="true" title="Click to edit project name">Untitled Project</div>
+        <div class="project-client" id="project-client-display" contenteditable="true" title="Click to edit client">Client</div>
+      </div>
+      <button class="btn-icon" id="btn-project-meta" title="Edit project metadata">✎</button>
+    </div>
+
+    <!-- Progress overview -->
+    <div class="sidebar-progress" id="sidebar-progress" style="display:none">
+      <div class="progress-label">
+        <span>Module Progress</span>
+        <span id="progress-fraction">0/0</span>
+      </div>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="progress-bar-fill"></div>
+      </div>
+      <div class="progress-stats" id="progress-stats"></div>
+    </div>
+
+    <!-- Type tabs -->
+    <div class="sidebar-tabs">
+      <button class="sidebar-tab active" data-type="pentest">Pentest</button>
+      <button class="sidebar-tab" data-type="consultant">Consultant</button>
+    </div>
+
+    <!-- Module list -->
+    <nav class="sidebar-nav" id="sidebar-nav"></nav>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <main class="main" id="main-content">
+    <div class="welcome-screen" id="welcome-screen">
+      <div class="welcome-icon">⬡</div>
+      <h1>SecWorkflow</h1>
+      <p>Professional pentesting &amp; consulting checklist tool.<br>Select a module from the sidebar to begin.</p>
+      <div class="welcome-cards">
+        <div class="welcome-card">
+          <div class="wc-icon">🔴</div>
+          <div class="wc-title">Pentest</div>
+          <div class="wc-desc">AD, Web, API, Network, Cloud, Wireless, Physical</div>
+        </div>
+        <div class="welcome-card">
+          <div class="wc-icon">📊</div>
+          <div class="wc-title">Consultant</div>
+          <div class="wc-desc">NIS2, NIST CSF 2.0, DORA, ISO 27001</div>
+        </div>
+        <div class="welcome-card">
+          <div class="wc-icon">📄</div>
+          <div class="wc-title">Reports</div>
+          <div class="wc-desc">Generate PDF-ready HTML or Markdown reports</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="checklist-container" id="checklist-container" style="display:none">
+      <div class="module-header" id="module-header"></div>
+      <div class="checklist-groups" id="checklist-groups"></div>
+    </div>
+  </main>
+
+</div>
+
+<!-- ── MODALS ──────────────────────────────────────────────────────────── -->
+
+<!-- Project Metadata Modal -->
+<div class="modal-overlay" id="modal-project" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Project Metadata</h2>
+      <button class="modal-close" data-modal="modal-project">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-group"><label>Project Name</label><input type="text" id="meta-project-name" placeholder="Internal Pentest Q2-2025" /></div>
+        <div class="form-group"><label>Client</label><input type="text" id="meta-client" placeholder="Acme Corp" /></div>
+        <div class="form-group"><label>Assessor(s)</label><input type="text" id="meta-assessor" placeholder="J. Smith, A. Lee" /></div>
+        <div class="form-group"><label>Classification</label>
+          <select id="meta-classification">
+            <option>CONFIDENTIAL</option>
+            <option>TLP:RED</option>
+            <option>TLP:AMBER</option>
+            <option>TLP:GREEN</option>
+            <option>INTERNAL</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Start Date</label><input type="date" id="meta-start-date" /></div>
+        <div class="form-group"><label>End Date</label><input type="date" id="meta-end-date" /></div>
+        <div class="form-group form-full"><label>Scope</label><textarea id="meta-scope" rows="3" placeholder="IP ranges, domains, applications in scope…"></textarea></div>
+        <div class="form-group form-full"><label>Exclusions</label><textarea id="meta-exclusions" rows="2" placeholder="Out-of-scope systems, restricted actions…"></textarea></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-modal="modal-project">Cancel</button>
+      <button class="btn btn-primary" id="btn-save-meta">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Report Modal -->
+<div class="modal-overlay" id="modal-report" style="display:none">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <h2>Generate Report</h2>
+      <button class="modal-close" data-modal="modal-report">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="report-options">
+        <div class="form-group">
+          <label>Report Type</label>
+          <select id="report-type">
+            <option value="pentest">Pentest Report (Technical)</option>
+            <option value="consultant">Consulting Report (Compliance)</option>
+            <option value="executive">Executive Summary</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Include modules</label>
+          <div id="report-module-checkboxes" class="checkbox-list"></div>
+        </div>
+        <div class="form-group">
+          <label>Include items with status</label>
+          <div class="checkbox-list">
+            <label><input type="checkbox" class="report-status-filter" value="vulnerable" checked /> Vulnerable / Gap</label>
+            <label><input type="checkbox" class="report-status-filter" value="in-progress" checked /> In Progress</label>
+            <label><input type="checkbox" class="report-status-filter" value="not-vulnerable" /> Not Vulnerable / Compliant</label>
+            <label><input type="checkbox" class="report-status-filter" value="cannot-verify" checked /> Cannot Verify</label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label><input type="checkbox" id="report-findings-only" /> Findings only (items with notes or promoted findings)</label>
+        </div>
+      </div>
+      <div class="report-preview" id="report-preview">
+        <p class="preview-placeholder">Configure options above and click Generate.</p>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-modal="modal-report">Close</button>
+      <button class="btn btn-ghost" id="btn-copy-report">⎘ Copy</button>
+      <button class="btn btn-ghost" id="btn-download-report-md">↓ Markdown</button>
+      <button class="btn btn-primary" id="btn-generate-report">Generate</button>
+      <button class="btn btn-primary" id="btn-print-report">🖶 Print / PDF</button>
+    </div>
+  </div>
+</div>
+
+<!-- Item Detail Side Panel -->
+<div class="panel-overlay" id="panel-overlay" style="display:none"></div>
+<div class="item-panel" id="item-panel" style="display:none">
+  <div class="panel-header">
+    <div class="panel-title" id="panel-title"></div>
+    <button class="panel-close" id="panel-close">✕</button>
+  </div>
+  <div class="panel-body">
+    <div class="panel-section">
+      <label class="panel-label">Status</label>
+      <select class="status-select panel-status" id="panel-status"></select>
+    </div>
+    <div class="panel-section">
+      <label class="panel-label">Severity Override</label>
+      <select id="panel-severity">
+        <option value="">— Use default —</option>
+        <option value="critical">Critical</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+        <option value="info">Info</option>
+      </select>
+    </div>
+    <div class="panel-section">
+      <label class="panel-label">Description</label>
+      <p class="panel-description" id="panel-description"></p>
+    </div>
+    <div class="panel-section">
+      <label class="panel-label">Notes / Observations</label>
+      <textarea id="panel-notes" rows="5" placeholder="Technical observations, test results, screenshots references…"></textarea>
+    </div>
+    <div class="panel-section">
+      <label class="panel-label">Evidence</label>
+      <textarea id="panel-evidence" rows="3" placeholder="Paste tool output, command, screenshot paths…"></textarea>
+    </div>
+    <div class="panel-section">
+      <label class="panel-label">Remediation</label>
+      <textarea id="panel-remediation" rows="3" placeholder="Override or supplement default remediation…"></textarea>
+    </div>
+    <div class="panel-section">
+      <label class="panel-label">Tags</label>
+      <div class="panel-tags" id="panel-tags"></div>
+    </div>
+    <div class="panel-section">
+      <label class="panel-label">Framework Mappings</label>
+      <div class="panel-frameworks" id="panel-frameworks"></div>
+    </div>
+    <div class="panel-section">
+      <label class="panel-label">Default Remediation</label>
+      <p class="panel-description muted" id="panel-default-remediation"></p>
+    </div>
+    <div class="panel-section panel-actions">
+      <label class="toggle-label">
+        <input type="checkbox" id="panel-is-finding" />
+        <span>Promote to Finding</span>
+      </label>
+    </div>
+  </div>
+  <div class="panel-footer">
+    <button class="btn btn-ghost" id="panel-close-btn">Close</button>
+    <button class="btn btn-primary" id="panel-save-btn">Save</button>
+  </div>
+</div>
+
+<!-- Toast notifications -->
+<div class="toast-container" id="toast-container"></div>
+
+<!-- Scripts -->
+<script src="js/data.js"></script>
+<script src="js/report.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
