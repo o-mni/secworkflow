@@ -78,6 +78,10 @@ class SecWorkflowApp {
       storageMode: localStorage.getItem(STORAGE_MODE_KEY) === 'local' ? 'local' : 'session',
     };
     this.panelItemId = null;
+    this._sessionDirty = false;          // true when unsaved work exists in Session Mode
+    this._pendingImportFile = null;      // staged file waiting for import confirmation
+    this._moduleCompleteToasted = false; // prevents repeat completion toasts per module
+    this._panelDirty = false;            // true when panel has unsaved edits
     this.reportGen = new ReportGenerator(this);
     this._loadFromStorage();
     this._init();
@@ -95,6 +99,7 @@ class SecWorkflowApp {
       this._loadModule(this.state.currentModuleId);
     }
     this._syncStorageModeUI();
+    this._updateDocTitle();
     this._checkFirstRun();
   }
 
@@ -113,7 +118,8 @@ class SecWorkflowApp {
     // Top bar buttons
     document.getElementById('btn-filter-toggle').addEventListener('click', () => this._toggleFilterBar());
     document.getElementById('btn-import').addEventListener('click', () => document.getElementById('import-file-input').click());
-    document.getElementById('import-file-input').addEventListener('change', e => this._importJSON(e));
+    document.getElementById('btn-confirm-import').addEventListener('click', () => this._doImport());
+    document.getElementById('import-file-input').addEventListener('change', e => this._stageImport(e));
     document.getElementById('btn-export-json').addEventListener('click', () => this._exportJSON());
     document.getElementById('btn-export-md').addEventListener('click', () => this._exportMarkdown());
     document.getElementById('btn-report').addEventListener('click', () => this._openReportModal());
@@ -172,6 +178,7 @@ class SecWorkflowApp {
     document.getElementById('project-name-display').addEventListener('blur', e => {
       this.state.metadata.projectName = e.target.textContent.trim() || 'Untitled Project';
       this._saveToStorage();
+      this._updateDocTitle();
     });
     document.getElementById('project-client-display').addEventListener('blur', e => {
       this.state.metadata.client = e.target.textContent.trim() || 'Client';
@@ -179,10 +186,26 @@ class SecWorkflowApp {
     });
 
     // Panel
-    document.getElementById('panel-close').addEventListener('click', () => this._closePanel());
+    document.getElementById('panel-close').addEventListener('click', () => this._closePanel(true));
     document.getElementById('panel-close-btn').addEventListener('click', () => this._closePanel());
     document.getElementById('panel-save-btn').addEventListener('click', () => this._savePanelItem());
-    document.getElementById('panel-overlay').addEventListener('click', () => this._closePanel());
+    document.getElementById('panel-overlay').addEventListener('click', () => this._closePanel(true));
+
+    // Mark panel dirty on any change (used to warn on close without saving)
+    ['panel-status', 'panel-severity', 'panel-notes', 'panel-evidence', 'panel-remediation', 'panel-is-finding'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.addEventListener('input',  () => { this._panelDirty = true; });
+        el.addEventListener('change', () => { this._panelDirty = true; });
+      }
+    });
+
+    // Prevent newlines in contenteditable project fields
+    ['project-name-display', 'project-client-display'].forEach(id => {
+      document.getElementById(id)?.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
+      });
+    });
 
     // Report modal
     document.getElementById('btn-generate-report').addEventListener('click', () => this._generateReport());
@@ -200,6 +223,61 @@ class SecWorkflowApp {
     document.getElementById('btn-clear-local-data').addEventListener('click', () => this._requestClearLocalData());
     document.getElementById('btn-confirm-clear-data').addEventListener('click', () => this._confirmClearLocalData());
 
+    // Warn before unload when unsaved work exists in Session Mode
+    window.addEventListener('beforeunload', (e) => {
+      if (this.state.storageMode === 'session' && this._sessionDirty) {
+        e.preventDefault();
+        e.returnValue = ''; // required for Chrome; shows browser-native dialog
+      }
+    });
+
+    // Welcome card click → load first module of that type
+    document.querySelectorAll('.welcome-card[data-action]').forEach(card => {
+      const activate = () => {
+        const action = card.dataset.action;
+        if (action === 'report') { this._openReportModal(); return; }
+        this.state.currentType = action;
+        document.querySelectorAll('.sidebar-tab').forEach(b => b.classList.toggle('active', b.dataset.type === action));
+        this._renderSidebar();
+        const mods = MODULES_BY_TYPE[action];
+        if (mods && mods.length > 0) this._loadModule(mods[0].id);
+      };
+      card.addEventListener('click', activate);
+      card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } });
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      const inInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName);
+
+      // Ctrl+/ — open filter bar and focus search
+      if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+        e.preventDefault();
+        if (!this.state.filterBarOpen) this._toggleFilterBar();
+        setTimeout(() => document.getElementById('filter-search').focus(), 50);
+        return;
+      }
+
+      // Escape — close filter bar
+      if (e.key === 'Escape' && this.state.filterBarOpen) {
+        this._toggleFilterBar();
+        return;
+      }
+
+      // N — jump to next not-started item (when not typing)
+      if (e.key === 'n' && !e.ctrlKey && !e.metaKey && !inInput) {
+        e.preventDefault();
+        const next = document.querySelector('.checklist-item[data-status="not-started"]:not(.filtered-out)');
+        if (next) {
+          next.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          next.classList.add('highlight-pulse');
+          setTimeout(() => next.classList.remove('highlight-pulse'), 900);
+        } else {
+          this._showToast('No unchecked items remaining', 'info');
+        }
+      }
+    });
+
     // Privacy notice dismiss
     document.getElementById('btn-privacy-dismiss').addEventListener('click', () => this._dismissPrivacyNotice());
   }
@@ -209,13 +287,23 @@ class SecWorkflowApp {
   _saveToStorage() {
     if (this.state.storageMode !== 'local') return; // Session Mode: no writes
     try {
+      const now = new Date().toISOString();
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         version: 1,
         metadata: this.state.metadata,
         itemStates: this.state.itemStates,
         currentModuleId: this.state.currentModuleId,
         currentType: this.state.currentType,
+        savedAt: now,
       }));
+      // Live-update timestamps in topbar and sidebar
+      const timeStr = new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const savedAtEl = document.querySelector('.smt-saved-at');
+      if (savedAtEl) savedAtEl.textContent = ` · ${timeStr}`;
+      const projectSavedAt = document.getElementById('project-saved-at');
+      if (projectSavedAt && projectSavedAt.style.display !== 'none') {
+        projectSavedAt.textContent = `Last saved ${timeStr}`;
+      }
     } catch (_) { /* storage full */ }
   }
 
@@ -241,6 +329,7 @@ class SecWorkflowApp {
   _confirmSwitchToLocal() {
     document.getElementById('modal-to-local').style.display = 'none';
     this.state.storageMode = 'local';
+    this._sessionDirty = false; // data is now being persisted
     localStorage.setItem(STORAGE_MODE_KEY, 'local');
     this._saveToStorage(); // Persist current in-memory state immediately
     this._syncStorageModeUI();
@@ -282,30 +371,86 @@ class SecWorkflowApp {
     this.state.currentType = 'pentest';
     this._syncMetaToUI();
     this._renderSidebar();
+    this._syncStorageModeUI();
+    this._updateDocTitle();
     document.getElementById('welcome-screen').style.display = 'block';
     document.getElementById('checklist-container').style.display = 'none';
-    this._closePanel();
+    this._closePanel(true);
     this._showToast('All local data cleared — app reset to defaults', 'success');
   }
 
   _syncStorageModeUI() {
     const isLocal = this.state.storageMode === 'local';
+    const hasLocalData = !!localStorage.getItem(STORAGE_KEY);
 
     // Segmented control active state
     document.getElementById('smt-session').classList.toggle('active', !isLocal);
     document.getElementById('smt-local').classList.toggle('active', isLocal);
 
-    // Status label
-    document.getElementById('smt-status').textContent = isLocal
-      ? 'Saved on this device'
-      : 'Not saved';
+    // Status label + optional saved-at timestamp
+    const statusEl = document.getElementById('smt-status');
+    if (isLocal) {
+      const savedAt = this._getLocalSavedAt();
+      statusEl.innerHTML = `Saved on this device${savedAt ? `<span class="smt-saved-at"> · ${savedAt}</span>` : ''}`;
+    } else {
+      statusEl.textContent = 'Session only — not saved locally';
+    }
 
     // Topbar visual accent for Local Mode
     document.querySelector('.topbar').classList.toggle('topbar-local-mode', isLocal);
 
-    // Show/hide clear-data option in Data dropdown
+    // Show/hide clear-data option in Data dropdown; disable if no data to clear
     const clearEl = document.getElementById('dropdown-clear-data');
-    if (clearEl) clearEl.style.display = isLocal ? '' : 'none';
+    const clearBtn = document.getElementById('btn-clear-local-data');
+    if (clearEl) clearEl.style.display = (isLocal || hasLocalData) ? '' : 'none';
+    if (clearBtn) {
+      clearBtn.disabled = !hasLocalData;
+      clearBtn.classList.toggle('dropdown-item-disabled', !hasLocalData);
+    }
+
+    // Sidebar project card: show last-saved timestamp in Local Mode
+    const projectSavedAt = document.getElementById('project-saved-at');
+    if (projectSavedAt) {
+      if (isLocal && hasLocalData) {
+        const savedAt = this._getLocalSavedAt();
+        projectSavedAt.textContent = savedAt ? `Last saved ${savedAt}` : 'Saved on this device';
+        projectSavedAt.style.display = '';
+      } else {
+        projectSavedAt.style.display = 'none';
+      }
+    }
+  }
+
+  _getLocalSavedAt() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      const saved = JSON.parse(raw);
+      if (saved.savedAt) {
+        return new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // ── Document title ────────────────────────────────────────────────────────
+
+  _updateDocTitle() {
+    const projectName = this.state.metadata.projectName;
+    const hasProject = projectName && projectName !== 'Untitled Project';
+    const mod = this.state.currentModuleId ? MODULE_MAP[this.state.currentModuleId] : null;
+
+    let title;
+    if (hasProject && mod) {
+      title = `${projectName} | ${mod.name} | SecWorkflow`;
+    } else if (hasProject) {
+      title = `${projectName} | SecWorkflow`;
+    } else if (mod) {
+      title = `SecWorkflow | ${mod.name}`;
+    } else {
+      title = 'SecWorkflow';
+    }
+    document.title = title;
   }
 
   _checkFirstRun() {
@@ -364,8 +509,11 @@ class SecWorkflowApp {
     this.state.currentModuleId = moduleId;
     this._saveToStorage();
 
-    // Update breadcrumb
-    document.getElementById('breadcrumb-text').textContent = `${module.icon} ${module.name}`;
+    // Update breadcrumb (with type prefix) and browser tab title
+    const typeLabel = this.state.currentType === 'pentest' ? 'Pentest' : 'Consultant';
+    document.getElementById('breadcrumb-text').textContent = `${typeLabel} / ${module.icon} ${module.name}`;
+    this._updateDocTitle();
+    this._moduleCompleteToasted = false;
 
     // Show/hide screens
     document.getElementById('welcome-screen').style.display = 'none';
@@ -405,6 +553,18 @@ class SecWorkflowApp {
 
     // Groups
     groups.innerHTML = '';
+
+    // First-time tip: show when no items have been touched yet
+    const allPristine = module.groups.every(g =>
+      g.items.every(i => !this.state.itemStates[i.id] || this.state.itemStates[i.id].status === 'not-started')
+    );
+    if (allPristine) {
+      const tip = document.createElement('div');
+      tip.className = 'module-first-tip';
+      tip.innerHTML = `<span class="module-first-tip-icon">💡</span> Click any row to open the detail panel — add notes, evidence, and set status. Use the dropdown on the right for a quick status change.`;
+      groups.appendChild(tip);
+    }
+
     for (const group of module.groups) {
       groups.appendChild(this._renderGroup(group));
     }
@@ -417,16 +577,25 @@ class SecWorkflowApp {
     container.className = 'checklist-group';
     container.dataset.groupId = group.id;
 
-    const completedCount = group.items.filter(i => {
+    let completedCount = 0, vulnCount = 0, compliantCount = 0;
+    for (const i of group.items) {
       const s = (this.state.itemStates[i.id] || {}).status || 'not-started';
-      return s !== 'not-started';
-    }).length;
+      if (s !== 'not-started') completedCount++;
+      if (s === 'vulnerable') vulnCount++;
+      else if (s === 'not-vulnerable') compliantCount++;
+    }
     const pct = group.items.length > 0 ? (completedCount / group.items.length) * 100 : 0;
+
+    const groupStatBits = [
+      vulnCount > 0 ? `<span class="group-stat"><span class="group-stat-dot" style="background:${STATUS_COLORS['vulnerable']}"></span>${vulnCount} vuln</span>` : '',
+      compliantCount > 0 ? `<span class="group-stat"><span class="group-stat-dot" style="background:${STATUS_COLORS['not-vulnerable']}"></span>${compliantCount} ok</span>` : '',
+    ].filter(Boolean).join('');
 
     const header = document.createElement('div');
     header.className = 'group-header';
     header.innerHTML = `
       <span class="group-header-title">${group.name}</span>
+      ${groupStatBits ? `<span class="group-stat-row">${groupStatBits}</span>` : ''}
       <span class="group-header-count">${completedCount}/${group.items.length}</span>
       <span class="group-chevron">▾</span>
     `;
@@ -516,6 +685,7 @@ class SecWorkflowApp {
     }
     this.state.itemStates[itemId][field] = value;
     this.state.itemStates[itemId].updatedAt = new Date().toISOString();
+    if (this.state.storageMode === 'session') this._sessionDirty = true;
     this._saveToStorage();
   }
 
@@ -560,11 +730,31 @@ class SecWorkflowApp {
     fwEl.innerHTML = (item.frameworks || []).map(f => `<span class="badge badge-framework">${f}</span>`).join('') || '<span class="text-muted text-small">None</span>';
 
     // Show panel
+    this._panelDirty = false;
     document.getElementById('panel-overlay').style.display = 'block';
     document.getElementById('item-panel').style.display = 'flex';
   }
 
-  _closePanel() {
+  _closePanel(force = false) {
+    if (!force && this._panelDirty) {
+      // Two-step confirm: first click turns button red, second click closes
+      const btn = document.getElementById('panel-close-btn');
+      if (!btn.dataset.confirmPending) {
+        btn.dataset.confirmPending = '1';
+        btn.textContent = 'Discard changes?';
+        btn.classList.add('panel-close-btn-warn');
+        setTimeout(() => {
+          delete btn.dataset.confirmPending;
+          btn.textContent = 'Close';
+          btn.classList.remove('panel-close-btn-warn');
+        }, 3000);
+        return;
+      }
+      delete btn.dataset.confirmPending;
+      btn.textContent = 'Close';
+      btn.classList.remove('panel-close-btn-warn');
+    }
+    this._panelDirty = false;
     document.getElementById('panel-overlay').style.display = 'none';
     document.getElementById('item-panel').style.display = 'none';
     this.panelItemId = null;
@@ -616,9 +806,10 @@ class SecWorkflowApp {
       } else if (notePreview) notePreview.remove();
     }
 
+    this._panelDirty = false;
     this._updateProgress(MODULE_MAP[this.state.currentModuleId]);
     this._renderSidebar();
-    this._closePanel();
+    this._closePanel(true);
     this._showToast('Item saved', 'success');
   }
 
@@ -652,8 +843,20 @@ class SecWorkflowApp {
     progressEl.style.display = 'block';
     const assessed = progress.total - progress.notStarted;
     const pct = progress.total > 0 ? (assessed / progress.total) * 100 : 0;
-    fill.style.width = `${pct}%`;
     fraction.textContent = `${assessed}/${progress.total}`;
+
+    // Stacked colour segments: vulnerable / compliant / in-progress / cannot-verify
+    const segments = [
+      { count: progress.vulnerable,   color: STATUS_COLORS['vulnerable']    },
+      { count: progress.compliant,    color: STATUS_COLORS['not-vulnerable'] },
+      { count: progress.inProgress,   color: STATUS_COLORS['in-progress']   },
+      { count: progress.cannotVerify, color: STATUS_COLORS['cannot-verify'] },
+      { count: progress.notInScope,   color: STATUS_COLORS['not-in-scope']  },
+    ].filter(s => s.count > 0);
+    fill.style.cssText = `width:${pct}%;height:100%;display:flex;background:none;border-radius:2px;transition:width .35s ease;overflow:hidden;`;
+    fill.innerHTML = segments.map(s =>
+      `<div style="flex:${s.count};background:${s.color};"></div>`
+    ).join('');
 
     stats.innerHTML = [
       { label: 'Vuln', count: progress.vulnerable, color: STATUS_COLORS['vulnerable'] },
@@ -676,6 +879,16 @@ class SecWorkflowApp {
           pill.innerHTML = `<span class="stat-pill-dot" style="background:${pill.querySelector('.stat-pill-dot').style.background}"></span>${values[i]} ${text[text.length - 1]}`;
         }
       });
+    }
+
+    // Module completion celebration (toast once per module load)
+    if (progress.notStarted === 0 && progress.total > 0 && !this._moduleCompleteToasted) {
+      this._moduleCompleteToasted = true;
+      const f = progress.vulnerable;
+      this._showToast(
+        f > 0 ? `All items assessed — ${f} finding${f !== 1 ? 's' : ''} flagged` : 'All items assessed — no findings',
+        'success'
+      );
     }
   }
 
@@ -838,13 +1051,37 @@ class SecWorkflowApp {
     };
     this._syncMetaToUI();
     this._saveToStorage();
+    this._updateDocTitle();
     document.getElementById('modal-project').style.display = 'none';
     this._showToast('Project metadata saved', 'success');
   }
 
   _syncMetaToUI() {
-    document.getElementById('project-name-display').textContent = this.state.metadata.projectName;
-    document.getElementById('project-client-display').textContent = this.state.metadata.client;
+    const m = this.state.metadata;
+
+    // Inline-editable fields (contenteditable)
+    document.getElementById('project-name-display').textContent = m.projectName;
+    document.getElementById('project-client-display').textContent = m.client;
+
+    // Classification badge
+    const classifEl = document.getElementById('project-classification-display');
+    if (classifEl) {
+      classifEl.textContent = m.classification || 'CONFIDENTIAL';
+      classifEl.dataset.value = m.classification || 'CONFIDENTIAL';
+    }
+
+    // Date range
+    const datesEl = document.getElementById('project-dates-display');
+    if (datesEl) {
+      if (m.startDate || m.endDate) {
+        const fmt = d => d
+          ? new Date(d + 'T12:00:00').toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
+          : '?';
+        datesEl.textContent = `${fmt(m.startDate)} – ${fmt(m.endDate)}`;
+      } else {
+        datesEl.textContent = '';
+      }
+    }
   }
 
   // ── Report modal ──────────────────────────────────────────────────────────
@@ -896,19 +1133,29 @@ class SecWorkflowApp {
     const safeName = (this.state.metadata.projectName || 'secworkflow')
       .replace(/[^a-zA-Z0-9_\-. ]/g, '_').replace(/\s+/g, '_').slice(0, 80).toLowerCase();
     this._downloadFile(`${safeName}_${new Date().toISOString().slice(0,10)}.json`, JSON.stringify(data, null, 2), 'application/json');
+    this._sessionDirty = false; // user has a backup now
     this._showToast('Exported JSON', 'success');
   }
 
-  _importJSON(event) {
+  // Stage the file and show confirmation modal before overwriting
+  _stageImport(event) {
     const file = event.target.files[0];
     if (!file) return;
-
-    // Reject files that are clearly too large (> 5 MB)
     if (file.size > 5 * 1024 * 1024) {
       this._showToast('File too large (max 5 MB)', 'error');
       event.target.value = '';
       return;
     }
+    this._pendingImportFile = file;
+    event.target.value = '';
+    document.getElementById('modal-import-confirm').style.display = 'flex';
+  }
+
+  _doImport() {
+    document.getElementById('modal-import-confirm').style.display = 'none';
+    const file = this._pendingImportFile;
+    this._pendingImportFile = null;
+    if (!file) return;
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -916,12 +1163,10 @@ class SecWorkflowApp {
         const data = JSON.parse(e.target.result);
         if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid structure');
 
-        // Sanitise metadata before merging
         if (data.metadata) {
           this.state.metadata = { ...this.state.metadata, ...sanitiseMetadata(data.metadata) };
         }
 
-        // Sanitise every item-state record before merging
         if (data.itemStates && typeof data.itemStates === 'object' && !Array.isArray(data.itemStates)) {
           for (const [key, val] of Object.entries(data.itemStates)) {
             if (typeof key === 'string' && key.length <= 200) {
@@ -932,6 +1177,8 @@ class SecWorkflowApp {
 
         this._syncMetaToUI();
         this._saveToStorage();
+        this._sessionDirty = false;
+        this._updateDocTitle();
         if (this.state.currentModuleId) this._loadModule(this.state.currentModuleId);
         this._renderSidebar();
         this._showToast('Data imported successfully', 'success');
@@ -940,7 +1187,6 @@ class SecWorkflowApp {
       }
     };
     reader.readAsText(file);
-    event.target.value = '';
   }
 
   _exportMarkdown() {
@@ -997,9 +1243,17 @@ class SecWorkflowApp {
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
     toast.textContent = message;
+    toast.title = 'Click to dismiss';
+    toast.style.cursor = 'pointer';
     container.appendChild(toast);
-    setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity .3s'; }, 2500);
-    setTimeout(() => toast.remove(), 2900);
+
+    const dismiss = () => {
+      toast.style.opacity = '0';
+      toast.style.transition = 'opacity .15s';
+      setTimeout(() => toast.remove(), 180);
+    };
+    toast.addEventListener('click', dismiss);
+    setTimeout(dismiss, 3000);
   }
 }
 

@@ -25,6 +25,15 @@
         content="camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()" />
   <!-- ─────────────────────────────────────────────────────────────────── -->
 
+  <!-- ── Favicon ───────────────────────────────────────────────────────────── -->
+  <!-- SVG shield favicon: visible at all sizes, matches security theme -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230c0e14'/%3E%3Cpath d='M16 4L6 9v7c0 5.5 4.3 10.6 10 12 5.7-1.4 10-6.5 10-12V9Z' fill='%234c73f8'/%3E%3Cpolyline points='11,16 14.5,19.5 21,13' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E" />
+  <!-- Legacy PNG fallback (browsers that don't support SVG favicons) -->
+  <link rel="alternate icon" type="image/png" href="data:image/png;base64,iVBORw0KGgo=" />
+  <!-- Apple touch icon -->
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%230c0e14'/%3E%3Cpath d='M90 22L34 52v40c0 31 24 59 56 68 32-9 56-37 56-68V52Z' fill='%234c73f8'/%3E%3Cpolyline points='62,90 81,109 118,73' stroke='white' stroke-width='14' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E" />
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
@@ -39,7 +48,7 @@
         <button class="smt-btn active" id="smt-session" title="Session Mode — data is not saved; cleared on refresh or tab close">Session</button>
         <button class="smt-btn" id="smt-local" title="Local Mode — data is saved in this browser on this device">Local</button>
       </div>
-      <span class="smt-status" id="smt-status">Not saved</span>
+      <span class="smt-status" id="smt-status">Session only — not saved locally</span>
     </div>
   </div>
   <div class="topbar-center">
@@ -143,13 +152,14 @@
     <!-- Project card -->
     <div class="sidebar-project-card" id="sidebar-project">
       <div class="project-card-body">
-        <div class="project-card-name" id="project-name-display">Untitled Project</div>
+        <div class="project-card-name" id="project-name-display" contenteditable="true" spellcheck="false" title="Click to edit project name">Untitled Project</div>
         <div class="project-card-meta">
-          <span class="project-card-client" id="project-client-display">Client</span>
+          <span class="project-card-client" id="project-client-display" contenteditable="true" spellcheck="false" title="Click to edit client name">Client</span>
           <span class="project-card-sep">·</span>
           <span class="project-card-classification" id="project-classification-display">CONFIDENTIAL</span>
         </div>
         <div class="project-card-dates" id="project-dates-display"></div>
+        <div class="project-card-saved-at" id="project-saved-at" style="display:none"></div>
       </div>
       <button class="project-edit-btn" id="btn-project-meta" title="Edit project details">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11l.178-.178z"/></svg>
@@ -186,20 +196,23 @@
       <h1>SecWorkflow</h1>
       <p>Professional pentesting &amp; consulting checklist tool.<br>Select a module from the sidebar to begin.</p>
       <div class="welcome-cards">
-        <div class="welcome-card">
+        <div class="welcome-card" data-action="pentest" tabindex="0" role="button" title="Browse Pentest modules">
           <div class="wc-icon">🔴</div>
           <div class="wc-title">Pentest</div>
           <div class="wc-desc">AD, Web, API, Network, Cloud, Wireless, Physical</div>
+          <div class="wc-cta">Start →</div>
         </div>
-        <div class="welcome-card">
+        <div class="welcome-card" data-action="consultant" tabindex="0" role="button" title="Browse Consultant modules">
           <div class="wc-icon">📊</div>
           <div class="wc-title">Consultant</div>
           <div class="wc-desc">NIS2, NIST CSF 2.0, DORA, ISO 27001</div>
+          <div class="wc-cta">Start →</div>
         </div>
-        <div class="welcome-card">
+        <div class="welcome-card" data-action="report" tabindex="0" role="button" title="Export a report">
           <div class="wc-icon">📄</div>
           <div class="wc-title">Reports</div>
           <div class="wc-desc">Generate print-ready PDF reports</div>
+          <div class="wc-cta">Open →</div>
         </div>
       </div>
     </div>
@@ -433,7 +446,7 @@
     </div>
   </div>
   <div class="panel-footer">
-    <button class="btn btn-ghost-modal" id="panel-close-btn">Discard</button>
+    <button class="btn btn-ghost-modal" id="panel-close-btn">Close</button>
     <button class="btn btn-primary-modal" id="panel-save-btn">Save</button>
   </div>
 </div>
@@ -520,6 +533,32 @@
     <div class="modal-footer">
       <button class="btn btn-ghost-modal" data-modal="modal-clear-data">Cancel</button>
       <button class="btn btn-danger-modal" id="btn-confirm-clear-data">Delete all local data</button>
+    </div>
+  </div>
+</div>
+
+<!-- Import confirmation modal -->
+<div class="modal-overlay" id="modal-import-confirm" style="display:none">
+  <div class="modal modal-storage-modal">
+    <div class="modal-header">
+      <div class="modal-header-icon">📥</div>
+      <div>
+        <h2>Import and replace all data?</h2>
+        <p class="modal-subtitle">This will overwrite your current session.</p>
+      </div>
+      <button class="modal-close" data-modal="modal-import-confirm">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="storage-notice-block">
+        <div class="storage-notice-item storage-notice-warn">
+          All current progress, notes, and project metadata will be replaced by the imported file.
+          Export a JSON backup first if you want to preserve your current work.
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost-modal" data-modal="modal-import-confirm">Cancel</button>
+      <button class="btn btn-warn-modal" id="btn-confirm-import">Import and replace</button>
     </div>
   </div>
 </div>

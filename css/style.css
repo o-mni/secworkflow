@@ -174,6 +174,17 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
 .project-card-classification[data-value="TLP:GREEN"] { background: rgba(16,185,129,.15); color: #6ee7b7; }
 .project-card-classification[data-value="INTERNAL"] { background: rgba(59,130,246,.15); color: #93c5fd; }
 .project-card-dates { font-size: 10px; color: var(--text-secondary); margin-top: 4px; opacity: .7; }
+
+/* Inline-editable project name / client */
+.project-card-name[contenteditable],
+.project-card-client[contenteditable] {
+  cursor: text; border-radius: 3px; outline: none;
+  transition: background .1s;
+}
+.project-card-name[contenteditable]:hover,
+.project-card-client[contenteditable]:hover  { background: rgba(255,255,255,.07); }
+.project-card-name[contenteditable]:focus,
+.project-card-client[contenteditable]:focus  { background: rgba(255,255,255,.1); box-shadow: 0 0 0 1px rgba(76,115,248,.4); }
 .project-edit-btn {
   background: none; border: none; color: var(--text-secondary); padding: 2px 4px;
   border-radius: 3px; flex-shrink: 0; margin-top: 2px;
@@ -241,8 +252,13 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
 .wc-title { font-weight: 700; color: var(--text-main); margin-bottom: 4px; font-size: 13px; }
 .wc-desc { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
 
-/* Module header */
-.module-header { margin-bottom: 18px; }
+/* Module header — sticky so stats stay visible while scrolling */
+.module-header {
+  margin-bottom: 18px;
+  position: sticky; top: 0; z-index: 10;
+  background: var(--bg-main);
+  padding-top: 4px; margin-top: -4px; /* cancel main's top padding shift */
+}
 .module-header-top { display: flex; align-items: flex-start; gap: 12px; }
 .module-header-icon { font-size: 26px; flex-shrink: 0; margin-top: 1px; }
 .module-header-info { flex: 1; }
@@ -269,6 +285,10 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
 .group-header-count { font-size: 11px; color: var(--text-muted); font-weight: 500; }
 .group-chevron { color: var(--text-muted); transition: transform .2s; font-size: 11px; }
 .group-header.collapsed .group-chevron { transform: rotate(-90deg); }
+/* Colored status summary inside group header */
+.group-stat-row { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.group-stat { display: flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 600; color: var(--text-muted); }
+.group-stat-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .group-progress { height: 2px; background: #f0f2f5; }
 .group-progress-fill { height: 100%; background: var(--accent); transition: width .3s; }
 .group-items {
@@ -576,16 +596,20 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
 }
 .smt-status {
   font-size: 10px; color: var(--text-muted); white-space: nowrap;
-  letter-spacing: .1px;
+  letter-spacing: .1px; max-width: 220px; overflow: hidden; text-overflow: ellipsis;
 }
+.smt-saved-at { color: #d97706; opacity: .9; }
 
-/* Local Mode: amber left-border accent on the topbar */
+/* Local Mode: amber border + warm gradient to signal data is being persisted */
 .topbar.topbar-local-mode {
   border-bottom-color: #d97706;
-  background: linear-gradient(to right, rgba(217,119,6,.18) 0%, var(--bg-topbar) 380px);
+  background: linear-gradient(to right, rgba(217,119,6,.22) 0%, var(--bg-topbar) 420px);
 }
 .topbar.topbar-local-mode .smt-status {
-  color: #d97706;
+  color: #fbbf24;
+}
+.topbar.topbar-local-mode #smt-local {
+  box-shadow: 0 0 0 1px rgba(217,119,6,.5);
 }
 
 /* ── Storage mode modal ───────────────────────────────────────────── */
@@ -630,6 +654,12 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
 .dropdown-item-danger { color: #ef4444 !important; }
 .dropdown-item-danger:hover { background: rgba(239,68,68,.1) !important; color: #ef4444 !important; }
 
+/* Disabled dropdown item (e.g. Clear local data when no data exists) */
+.dropdown-item-disabled,
+.dropdown-item:disabled {
+  opacity: .38; cursor: not-allowed; pointer-events: none;
+}
+
 /* ── Privacy notice modal ─────────────────────────────────────────── */
 .modal-privacy-modal { max-width: 520px; }
 .privacy-notice-block { display: flex; flex-direction: column; gap: 12px; }
@@ -652,3 +682,88 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
   background: rgba(239,68,68,.04);
   text-align: center;
 }
+
+/* ── Welcome card CTA ────────────────────────────────────────────── */
+.welcome-card[data-action] { cursor: pointer; }
+.welcome-card[data-action]:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wc-cta {
+  font-size: 11px; font-weight: 700; color: var(--accent);
+  margin-top: 10px; opacity: 0; transition: opacity .15s;
+}
+.welcome-card:hover .wc-cta { opacity: 1; }
+
+/* ── Sidebar saved-at ────────────────────────────────────────────── */
+.project-card-saved-at {
+  font-size: 9.5px; color: #d97706; margin-top: 4px;
+  letter-spacing: .1px; opacity: .85;
+}
+
+/* ── First-time module tip ───────────────────────────────────────── */
+.module-first-tip {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 14px; margin-bottom: 14px;
+  background: #f0f4ff; border: 1px solid #c7d4ff;
+  border-radius: var(--radius); font-size: 12px; color: #374151; line-height: 1.5;
+}
+.module-first-tip-icon { font-size: 14px; flex-shrink: 0; }
+
+/* ── N-key highlight pulse ───────────────────────────────────────── */
+@keyframes highlightPulse {
+  0%   { box-shadow: inset 0 0 0 2px var(--accent); background: #f0f4ff; }
+  70%  { box-shadow: inset 0 0 0 2px var(--accent); background: #f0f4ff; }
+  100% { box-shadow: none; background: transparent; }
+}
+.checklist-item.highlight-pulse { animation: highlightPulse .9s ease forwards; }
+
+/* ── Color-blind accessible status shapes ────────────────────────── */
+/* Vulnerable → rotated diamond (shape + color) */
+.status-dot.status-vulnerable { border-radius: 2px; transform: rotate(45deg); }
+/* Cannot verify → rounded square */
+.status-dot.status-cannot-verify { border-radius: 2px; }
+/* Not in scope → smaller circle with border */
+.status-dot.status-not-in-scope {
+  background: transparent !important;
+  border: 2px solid var(--status-not-in-scope);
+}
+
+/* ── Print stylesheet ────────────────────────────────────────────── */
+@media print {
+  .topbar, .sidebar, .filter-bar, .item-panel, .panel-overlay,
+  .toast-container, .modal-overlay, .item-actions { display: none !important; }
+
+  .layout { display: block; position: static; }
+  .main { overflow: visible; padding: 0; }
+  .checklist-container { display: block !important; }
+  .module-header { position: static; }
+
+  .checklist-item { break-inside: avoid; border-bottom: 1px solid #e4e6eb; }
+  .checklist-item.filtered-out { display: none; }
+  .group-items.collapsed { display: flex !important; }
+
+  body { font-size: 12px; color: #000; background: #fff; }
+  .item-title { color: #000; }
+  .item-desc { color: #444; }
+  .group-header { background: #f4f4f4 !important; border: 1px solid #ccc; }
+  .group-header-title { color: #000; }
+
+  a { color: #000; text-decoration: none; }
+}
+
+/* ── Panel close-btn: warn state (unsaved changes) ───────────────── */
+.panel-close-btn-warn {
+  color: #dc2626 !important; border-color: rgba(220,38,38,.4) !important;
+  background: rgba(220,38,38,.06) !important;
+  animation: warnShake .25s ease;
+}
+@keyframes warnShake {
+  0%,100% { transform: translateX(0); }
+  25%      { transform: translateX(-3px); }
+  75%      { transform: translateX(3px); }
+}
+
+/* ── Classification badge: data-value colour variants ───────────── */
+.project-card-classification[data-value="CONFIDENTIAL"] { background: rgba(220,38,38,.18); color: #fca5a5; }
+.project-card-classification[data-value="TLP:RED"]      { background: rgba(220,38,38,.2);  color: #fca5a5; }
+.project-card-classification[data-value="TLP:AMBER"]    { background: rgba(245,158,11,.15); color: #fcd34d; }
+.project-card-classification[data-value="TLP:GREEN"]    { background: rgba(16,185,129,.15); color: #6ee7b7; }
+.project-card-classification[data-value="INTERNAL"]     { background: rgba(59,130,246,.15); color: #93c5fd; }
