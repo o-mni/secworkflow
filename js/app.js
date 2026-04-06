@@ -18,6 +18,7 @@ class SecWorkflowApp {
         endDate: '',
         scope: '',
         exclusions: '',
+        version: '1.0',
       },
       itemStates: {},
       filters: { status: 'all', severity: 'all', tag: 'all', search: '', findingsOnly: false },
@@ -63,6 +64,31 @@ class SecWorkflowApp {
     document.getElementById('btn-report').addEventListener('click', () => this._openReportModal());
     document.getElementById('btn-project-meta').addEventListener('click', () => this._openMetaModal());
 
+    // Data dropdown toggle
+    const dataMenuWrap = document.getElementById('data-menu-wrap');
+    document.getElementById('btn-data-menu').addEventListener('click', (e) => {
+      e.stopPropagation();
+      dataMenuWrap.classList.toggle('open');
+    });
+    document.addEventListener('click', () => dataMenuWrap.classList.remove('open'));
+
+    // Classification picker
+    document.getElementById('classification-picker').addEventListener('click', (e) => {
+      const btn = e.target.closest('.classif-btn');
+      if (!btn) return;
+      document.querySelectorAll('.classif-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('meta-classification').value = btn.dataset.value;
+    });
+
+    // Report type card active state
+    document.getElementById('report-type-cards').addEventListener('change', (e) => {
+      if (e.target.name === 'report-type') {
+        document.querySelectorAll('.report-type-card').forEach(c => c.classList.remove('active'));
+        e.target.closest('.report-type-card').classList.add('active');
+      }
+    });
+
     // Filters
     document.getElementById('filter-status').addEventListener('change', e => { this.state.filters.status = e.target.value; this._applyFilters(); });
     document.getElementById('filter-severity').addEventListener('change', e => { this.state.filters.severity = e.target.value; this._applyFilters(); });
@@ -105,9 +131,6 @@ class SecWorkflowApp {
 
     // Report modal
     document.getElementById('btn-generate-report').addEventListener('click', () => this._generateReport());
-    document.getElementById('btn-copy-report').addEventListener('click', () => this._copyReport());
-    document.getElementById('btn-download-report-md').addEventListener('click', () => this._downloadReportMD());
-    document.getElementById('btn-print-report').addEventListener('click', () => window.print());
   }
 
   // ── Storage ────────────────────────────────────────────────────────────────
@@ -512,6 +535,10 @@ class SecWorkflowApp {
   _applyFilters() {
     const { status, severity, tag, search, findingsOnly } = this.state.filters;
     const rows = document.querySelectorAll('.checklist-item');
+    const searchLower = search.toLowerCase();
+
+    let visible = 0;
+    const total = rows.length;
 
     rows.forEach(row => {
       let show = true;
@@ -525,11 +552,76 @@ class SecWorkflowApp {
       if (status !== 'all' && rowStatus !== status) show = false;
       if (severity !== 'all' && rowSeverity !== severity) show = false;
       if (tag !== 'all' && !rowTags.split(',').includes(tag)) show = false;
-      if (search && !rowTitle.includes(search.toLowerCase()) && !rowDesc.includes(search.toLowerCase())) show = false;
+      if (searchLower && !rowTitle.includes(searchLower) && !rowDesc.includes(searchLower)) show = false;
       if (findingsOnly && !rowFinding) show = false;
 
       row.classList.toggle('filtered-out', !show);
+      if (show) visible++;
     });
+
+    // Hide groups with no visible items
+    document.querySelectorAll('.checklist-group').forEach(group => {
+      const hasVisible = group.querySelectorAll('.checklist-item:not(.filtered-out)').length > 0;
+      group.style.display = hasVisible ? '' : 'none';
+    });
+
+    // Update result count
+    const countEl = document.getElementById('filter-count');
+    if (countEl && total > 0) {
+      countEl.textContent = visible === total ? `${total} items` : `${visible} / ${total} items`;
+    }
+
+    // Empty state
+    const groups = document.getElementById('checklist-groups');
+    if (groups) {
+      let emptyEl = document.getElementById('filter-empty-msg');
+      if (visible === 0 && total > 0) {
+        if (!emptyEl) {
+          emptyEl = document.createElement('div');
+          emptyEl.id = 'filter-empty-msg';
+          emptyEl.className = 'filter-empty-state';
+          emptyEl.innerHTML = '<p><strong>No items match the current filters.</strong></p><p>Try adjusting or clearing the filters above.</p>';
+          groups.parentNode.insertBefore(emptyEl, groups.nextSibling);
+        }
+        emptyEl.style.display = '';
+      } else if (emptyEl) {
+        emptyEl.style.display = 'none';
+      }
+    }
+
+    this._updateFilterBadge();
+  }
+
+  _updateFilterBadge() {
+    const { status, severity, tag, search, findingsOnly } = this.state.filters;
+    let count = 0;
+    if (status !== 'all') count++;
+    if (severity !== 'all') count++;
+    if (tag !== 'all') count++;
+    if (search) count++;
+    if (findingsOnly) count++;
+
+    const badge = document.getElementById('filter-active-badge');
+    if (badge) {
+      badge.textContent = count;
+      badge.style.display = count > 0 ? 'inline-flex' : 'none';
+    }
+
+    // Visual active state on inputs
+    const statusSel = document.getElementById('filter-status');
+    if (statusSel) statusSel.classList.toggle('filter-active', status !== 'all');
+    const sevSel = document.getElementById('filter-severity');
+    if (sevSel) sevSel.classList.toggle('filter-active', severity !== 'all');
+    const tagSel = document.getElementById('filter-tag');
+    if (tagSel) tagSel.classList.toggle('filter-active', tag !== 'all');
+    const searchIn = document.getElementById('filter-search');
+    if (searchIn) searchIn.classList.toggle('filter-active', !!search);
+    const findingsChk = document.getElementById('filter-findings-only');
+    if (findingsChk) findingsChk.parentElement?.classList.toggle('filter-active-label', findingsOnly);
+
+    // Clear button visibility
+    const clearBtn = document.getElementById('btn-filter-clear');
+    if (clearBtn) clearBtn.style.visibility = count > 0 ? 'visible' : 'hidden';
   }
 
   _clearFilters() {
@@ -544,9 +636,9 @@ class SecWorkflowApp {
 
   _toggleFilterBar() {
     this.state.filterBarOpen = !this.state.filterBarOpen;
-    const bar = document.getElementById('filter-bar');
-    bar.style.display = this.state.filterBarOpen ? 'flex' : 'none';
+    document.getElementById('filter-bar').classList.toggle('open', this.state.filterBarOpen);
     document.querySelector('.layout').classList.toggle('filter-open', this.state.filterBarOpen);
+    document.getElementById('btn-filter-toggle').classList.toggle('active', this.state.filterBarOpen);
   }
 
   // ── Metadata modal ────────────────────────────────────────────────────────
@@ -556,11 +648,19 @@ class SecWorkflowApp {
     document.getElementById('meta-project-name').value = m.projectName || '';
     document.getElementById('meta-client').value = m.client || '';
     document.getElementById('meta-assessor').value = m.assessor || '';
-    document.getElementById('meta-classification').value = m.classification || 'CONFIDENTIAL';
+    document.getElementById('meta-version').value = m.version || '1.0';
     document.getElementById('meta-start-date').value = m.startDate || '';
     document.getElementById('meta-end-date').value = m.endDate || '';
     document.getElementById('meta-scope').value = m.scope || '';
     document.getElementById('meta-exclusions').value = m.exclusions || '';
+
+    // Sync classification picker buttons
+    const classifVal = m.classification || 'CONFIDENTIAL';
+    document.getElementById('meta-classification').value = classifVal;
+    document.querySelectorAll('.classif-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.value === classifVal);
+    });
+
     document.getElementById('modal-project').style.display = 'flex';
   }
 
@@ -570,6 +670,7 @@ class SecWorkflowApp {
       client: document.getElementById('meta-client').value.trim() || 'Client',
       assessor: document.getElementById('meta-assessor').value.trim(),
       classification: document.getElementById('meta-classification').value,
+      version: document.getElementById('meta-version').value.trim() || '1.0',
       startDate: document.getElementById('meta-start-date').value,
       endDate: document.getElementById('meta-end-date').value,
       scope: document.getElementById('meta-scope').value.trim(),
@@ -589,39 +690,37 @@ class SecWorkflowApp {
   // ── Report modal ──────────────────────────────────────────────────────────
 
   _openReportModal() {
-    // Populate module checkboxes
     const container = document.getElementById('report-module-checkboxes');
     container.innerHTML = '';
     for (const mod of ALL_MODULES) {
       const label = document.createElement('label');
+      label.className = 'cb-label';
       label.innerHTML = `<input type="checkbox" class="report-module-cb" value="${mod.id}" checked /> ${mod.icon} ${mod.name}`;
       container.appendChild(label);
     }
+    // Reset type cards to first option
+    document.querySelectorAll('.report-type-card').forEach((c, i) => c.classList.toggle('active', i === 0));
+    const firstRadio = document.querySelector('[name="report-type"]');
+    if (firstRadio) firstRadio.checked = true;
+
     document.getElementById('modal-report').style.display = 'flex';
-    document.getElementById('report-preview').innerHTML = '<p class="preview-placeholder">Configure options above and click Generate.</p>';
   }
 
   _generateReport() {
-    const type = document.getElementById('report-type').value;
+    const typeEl = document.querySelector('[name="report-type"]:checked');
+    const type = typeEl ? typeEl.value : 'pentest';
     const includedModuleIds = [...document.querySelectorAll('.report-module-cb:checked')].map(el => el.value);
     const includeStatuses = [...document.querySelectorAll('.report-status-filter:checked')].map(el => el.value);
     const findingsOnly = document.getElementById('report-findings-only').checked;
 
-    const markdown = this.reportGen.generate({ type, includedModuleIds, includeStatuses, findingsOnly });
-    this._currentReportMD = markdown;
-    document.getElementById('report-preview').textContent = markdown;
-    this._showToast('Report generated', 'success');
-  }
+    if (includedModuleIds.length === 0) {
+      this._showToast('Select at least one module', 'info');
+      return;
+    }
 
-  _copyReport() {
-    if (!this._currentReportMD) { this._showToast('Generate a report first', 'info'); return; }
-    navigator.clipboard.writeText(this._currentReportMD).then(() => this._showToast('Copied to clipboard', 'success'));
-  }
-
-  _downloadReportMD() {
-    if (!this._currentReportMD) { this._showToast('Generate a report first', 'info'); return; }
-    const name = (this.state.metadata.projectName || 'report').replace(/\s+/g, '_').toLowerCase();
-    this._downloadFile(`${name}_report.md`, this._currentReportMD, 'text/markdown');
+    document.getElementById('modal-report').style.display = 'none';
+    this.reportGen.generatePDF({ type, includedModuleIds, includeStatuses, findingsOnly });
+    this._showToast('Opening PDF report…', 'success');
   }
 
   // ── Import / Export ────────────────────────────────────────────────────────

@@ -7,7 +7,7 @@ class ReportGenerator {
 
   // ── Entry point ────────────────────────────────────────────────────────────
 
-  generate(options = {}) {
+  generatePDF(options = {}) {
     const {
       type = 'pentest',
       includedModuleIds = [],
@@ -18,9 +18,7 @@ class ReportGenerator {
     const state = this.app.state;
     const meta = state.metadata;
 
-    // Collect findings per module
     const moduleReports = [];
-
     for (const modId of includedModuleIds) {
       const module = MODULE_MAP[modId];
       if (!module) continue;
@@ -35,318 +33,551 @@ class ReportGenerator {
       });
 
       if (filtered.length === 0) continue;
-
       const progress = this.app.getModuleProgress(module);
       moduleReports.push({ module, items: filtered, progress });
     }
 
-    if (type === 'executive') return this._generateExecutive(meta, moduleReports);
-    if (type === 'consultant') return this._generateConsultant(meta, moduleReports);
-    return this._generatePentest(meta, moduleReports);
+    let body, title;
+    if (type === 'executive') {
+      title = `Executive Summary — ${meta.projectName || 'Security Assessment'}`;
+      body = this._buildExecutiveBody(meta, moduleReports);
+    } else if (type === 'consultant') {
+      title = `Compliance Assessment — ${meta.projectName || 'Assessment'}`;
+      body = this._buildConsultantBody(meta, moduleReports);
+    } else {
+      title = `Penetration Test Report — ${meta.projectName || 'Assessment'}`;
+      body = this._buildPentestBody(meta, moduleReports);
+    }
+
+    const html = this._buildHTMLShell(title, meta, body);
+    const win = window.open('', '_blank');
+    if (!win) {
+      alert('Please allow pop-ups for this page to generate the PDF report.');
+      return;
+    }
+    win.document.write(html);
+    win.document.close();
   }
 
-  // ── Pentest report ─────────────────────────────────────────────────────────
+  // ── HTML shell with embedded styles ────────────────────────────────────────
 
-  _generatePentest(meta, moduleReports) {
-    const now = new Date().toISOString().slice(0, 10);
-    const findings = this._collectFindings(moduleReports, 'pentest');
-    const vulnCount = this._countByStatus(moduleReports, 'vulnerable');
+  _buildHTMLShell(title, meta, body) {
+    const classifColorMap = {
+      'CONFIDENTIAL': '#dc2626',
+      'TLP:RED':      '#dc2626',
+      'TLP:AMBER':    '#d97706',
+      'TLP:GREEN':    '#059669',
+      'INTERNAL':     '#2563eb',
+    };
+    const classifColor = classifColorMap[meta.classification] || '#dc2626';
+    const accent = '#3b4ef8';
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>${this._esc(title)}</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+@page { margin: 18mm 16mm; size: A4; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, Helvetica, sans-serif;
+  font-size: 10.5pt; color: #1e1e2e; line-height: 1.65; background: #fff;
+}
+
+/* ── Cover ── */
+.cover { display: flex; flex-direction: column; min-height: 100vh; page-break-after: always; break-after: page; }
+.cover-accent { height: 8px; background: ${accent}; flex-shrink: 0; }
+.cover-body { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 48pt 52pt; }
+.cover-wordmark { font-size: 11pt; font-weight: 700; color: ${accent}; letter-spacing: -.3px; margin-bottom: 36pt; }
+.cover-report-type { font-size: 8pt; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: ${accent}; margin-bottom: 10pt; }
+.cover-title { font-size: 26pt; font-weight: 800; color: #0a0a18; line-height: 1.15; letter-spacing: -.5pt; margin-bottom: 8pt; }
+.cover-client { font-size: 13pt; color: #666; margin-bottom: 40pt; }
+.cover-divider { height: 1px; background: #e5e7eb; margin-bottom: 24pt; }
+.cover-meta { display: grid; grid-template-columns: 110pt 1fr; row-gap: 9pt; column-gap: 16pt; }
+.cover-meta-key { font-size: 8pt; color: #999; text-transform: uppercase; letter-spacing: .6px; font-weight: 600; padding-top: 1pt; }
+.cover-meta-val { font-size: 9.5pt; color: #1e1e2e; font-weight: 500; }
+.cover-footer { display: flex; justify-content: space-between; align-items: center; padding: 12pt 52pt; border-top: 1px solid #e5e7eb; flex-shrink: 0; }
+.cover-classif { font-size: 7.5pt; font-weight: 800; letter-spacing: 2px; color: ${classifColor}; text-transform: uppercase; }
+.cover-generated { font-size: 7.5pt; color: #ccc; }
+
+/* ── Section headings ── */
+.page-break { page-break-before: always; break-before: page; }
+.section { margin-bottom: 24pt; }
+
+h1.sec-title {
+  font-size: 16pt; font-weight: 800; color: #0a0a18; letter-spacing: -.3pt;
+  padding-bottom: 8pt; border-bottom: 2.5px solid ${accent}; margin-bottom: 20pt;
+}
+h2.sub-title { font-size: 12pt; font-weight: 700; color: #1e1e2e; margin-top: 20pt; margin-bottom: 10pt; }
+h3.sub-sub { font-size: 10.5pt; font-weight: 700; color: #1e1e2e; margin-bottom: 7pt; margin-top: 14pt; }
+
+p { margin-bottom: 8pt; font-size: 10pt; }
+ul, ol { margin-left: 16pt; margin-bottom: 8pt; }
+li { margin-bottom: 3pt; font-size: 10pt; }
+
+/* ── Tables ── */
+table { width: 100%; border-collapse: collapse; margin-bottom: 14pt; font-size: 9pt; }
+thead tr { background: #f4f5ff; }
+th { text-align: left; padding: 7pt 10pt; font-size: 8pt; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: .4px; border-bottom: 2px solid #e5e7eb; white-space: nowrap; }
+td { padding: 7pt 10pt; border-bottom: 1px solid #f0f2f5; vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+
+/* ── Risk summary cards ── */
+.risk-row { display: flex; gap: 10pt; margin-bottom: 18pt; }
+.risk-card { flex: 1; text-align: center; padding: 12pt 8pt; border-radius: 7px; border: 1px solid #e5e7eb; }
+.risk-count { font-size: 22pt; font-weight: 800; line-height: 1; margin-bottom: 3pt; }
+.risk-label { font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: #888; }
+.rc-critical .risk-count { color: #dc2626; }
+.rc-high .risk-count { color: #ea580c; }
+.rc-medium .risk-count { color: #d97706; }
+.rc-low .risk-count { color: #2563eb; }
+.rc-info .risk-count { color: #6b7280; }
+
+/* ── Module group headers ── */
+.mod-header { display: flex; align-items: center; gap: 8pt; padding: 7pt 12pt; background: #f4f5ff; border-radius: 6px; margin-bottom: 10pt; border-left: 3px solid ${accent}; }
+.mod-icon { font-size: 13pt; }
+.mod-name { font-size: 10.5pt; font-weight: 700; color: #0a0a18; }
+
+/* ── Finding cards ── */
+.finding-card { border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 14pt; page-break-inside: avoid; }
+.finding-header { display: flex; align-items: center; gap: 10pt; padding: 9pt 14pt; background: #f9f9ff; border-bottom: 1px solid #e5e7eb; border-radius: 8px 8px 0 0; }
+.finding-num { font-size: 8pt; font-weight: 700; color: ${accent}; flex-shrink: 0; }
+.finding-name { font-size: 10pt; font-weight: 700; color: #0a0a18; flex: 1; }
+.finding-body { padding: 12pt 14pt; display: flex; flex-direction: column; gap: 9pt; }
+.fld { display: flex; flex-direction: column; gap: 2pt; }
+.fld-label { font-size: 7.5pt; font-weight: 700; color: #aaa; text-transform: uppercase; letter-spacing: .5px; }
+.fld-value { font-size: 9.5pt; color: #1e1e2e; line-height: 1.55; }
+.fld-value.mono {
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, 'Courier New', monospace; font-size: 8.5pt;
+  background: #f4f5f7; padding: 7pt 10pt; border-radius: 4px; white-space: pre-wrap;
+  word-break: break-all; color: #2d3748; border: 1px solid #e8eaed;
+}
+.fld-row { display: flex; gap: 16pt; flex-wrap: wrap; }
+.fld-row .fld { flex: 1; min-width: 80pt; }
+
+/* ── Observations list ── */
+.obs-list { border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; margin-bottom: 10pt; }
+.obs-item { display: flex; align-items: flex-start; gap: 10pt; padding: 8pt 12pt; border-bottom: 1px solid #f0f2f5; }
+.obs-item:last-child { border-bottom: none; }
+.obs-main { flex: 1; }
+.obs-title { font-size: 9.5pt; font-weight: 600; color: #1e1e2e; }
+.obs-note { font-size: 9pt; color: #666; margin-top: 2pt; }
+
+/* ── Badges ── */
+.badge { display: inline-block; padding: 1.5pt 6pt; border-radius: 3px; font-size: 8pt; font-weight: 700; letter-spacing: .3px; text-transform: uppercase; white-space: nowrap; }
+.b-critical      { background: #fee2e2; color: #dc2626; }
+.b-high          { background: #ffedd5; color: #ea580c; }
+.b-medium        { background: #fef9c3; color: #d97706; }
+.b-low           { background: #dbeafe; color: #2563eb; }
+.b-info          { background: #f3f4f6; color: #6b7280; }
+.b-vulnerable    { background: #fee2e2; color: #dc2626; }
+.b-in-progress   { background: #dbeafe; color: #1d4ed8; }
+.b-cannot-verify { background: #fef9c3; color: #92400e; }
+.b-not-vulnerable{ background: #dcfce7; color: #166534; }
+.b-not-started   { background: #f3f4f6; color: #4b5563; }
+.b-not-in-scope  { background: #f3f4f6; color: #9ca3af; }
+
+/* ── Empty state ── */
+.no-findings { text-align: center; padding: 28pt; color: #aaa; font-size: 10pt; background: #fafafa; border-radius: 8px; border: 1px solid #e5e7eb; }
+
+@media print {
+  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .page-break { page-break-before: always; }
+  .finding-card { page-break-inside: avoid; }
+  .cover { page-break-after: always; }
+}
+</style>
+</head>
+<body>
+${body}
+<script>
+setTimeout(function() { window.print(); }, 400);
+</script>
+</body>
+</html>`;
+  }
+
+  // ── Pentest report body ────────────────────────────────────────────────────
+
+  _buildPentestBody(meta, moduleReports) {
+    const now = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
+    const findings = this._collectFindings(moduleReports);
     const sevCounts = this._countBySeverity(findings);
+    const version = meta.version || '1.0';
 
-    let md = '';
-    md += `# Penetration Test Report\n\n`;
-    md += `| Field | Value |\n|---|---|\n`;
-    md += `| Project | ${meta.projectName || 'Untitled'} |\n`;
-    md += `| Client | ${meta.client || '—'} |\n`;
-    md += `| Assessor(s) | ${meta.assessor || '—'} |\n`;
-    md += `| Classification | ${meta.classification || 'CONFIDENTIAL'} |\n`;
-    md += `| Test Period | ${meta.startDate || '—'} to ${meta.endDate || '—'} |\n`;
-    md += `| Report Date | ${now} |\n\n`;
+    let h = '';
 
-    md += `---\n\n## Executive Summary\n\n`;
-    md += `This report presents the results of a penetration test conducted against ${meta.client || 'the client'} environment. `;
-    md += `The assessment covered ${moduleReports.length} module(s) with a total of **${vulnCount} vulnerabilities identified**.\n\n`;
+    // Cover
+    h += `<div class="cover">
+  <div class="cover-accent"></div>
+  <div class="cover-body">
+    <div class="cover-wordmark">⬡ SecWorkflow</div>
+    <div class="cover-report-type">Penetration Test Report</div>
+    <h1 class="cover-title">${this._esc(meta.projectName || 'Security Assessment')}</h1>
+    <div class="cover-client">${this._esc(meta.client || '')}</div>
+    <div class="cover-divider"></div>
+    <div class="cover-meta">
+      <div class="cover-meta-key">Client</div><div class="cover-meta-val">${this._esc(meta.client || '—')}</div>
+      <div class="cover-meta-key">Assessor(s)</div><div class="cover-meta-val">${this._esc(meta.assessor || '—')}</div>
+      <div class="cover-meta-key">Test Period</div><div class="cover-meta-val">${this._esc(meta.startDate || '—')} – ${this._esc(meta.endDate || '—')}</div>
+      <div class="cover-meta-key">Report Date</div><div class="cover-meta-val">${now}</div>
+      <div class="cover-meta-key">Version</div><div class="cover-meta-val">${this._esc(version)}</div>
+      <div class="cover-meta-key">Classification</div><div class="cover-meta-val">${this._esc(meta.classification || 'CONFIDENTIAL')}</div>
+    </div>
+  </div>
+  <div class="cover-footer">
+    <div class="cover-classif">${this._esc(meta.classification || 'CONFIDENTIAL')}</div>
+    <div class="cover-generated">Generated ${now}</div>
+  </div>
+</div>`;
 
-    md += `### Risk Summary\n\n`;
-    md += `| Severity | Count |\n|---|---|\n`;
-    for (const sev of ['critical', 'high', 'medium', 'low', 'info']) {
-      if (sevCounts[sev]) md += `| ${sev.charAt(0).toUpperCase() + sev.slice(1)} | ${sevCounts[sev]} |\n`;
+    // Executive Summary
+    h += `<div class="section page-break">
+<h1 class="sec-title">Executive Summary</h1>
+<p>This report presents the results of a penetration test conducted against <strong>${this._esc(meta.client || 'the client')}</strong>. The assessment covered <strong>${moduleReports.length} module(s)</strong> with a total of <strong>${findings.length} vulnerability/vulnerabilities identified</strong>.</p>
+<h2 class="sub-title">Risk Summary</h2>
+<div class="risk-row">`;
+    for (const [sev, cls] of [['critical','rc-critical'],['high','rc-high'],['medium','rc-medium'],['low','rc-low'],['info','rc-info']]) {
+      h += `<div class="risk-card ${cls}"><div class="risk-count">${sevCounts[sev]||0}</div><div class="risk-label">${sev}</div></div>`;
     }
-    md += `\n`;
+    h += `</div>`;
 
-    if (meta.scope) {
-      md += `## Scope\n\n${meta.scope}\n\n`;
-    }
-    if (meta.exclusions) {
-      md += `## Exclusions\n\n${meta.exclusions}\n\n`;
-    }
+    if (meta.scope) h += `<h2 class="sub-title">Scope</h2><p>${this._esc(meta.scope).replace(/\n/g,'<br>')}</p>`;
+    if (meta.exclusions) h += `<h2 class="sub-title">Exclusions</h2><p>${this._esc(meta.exclusions).replace(/\n/g,'<br>')}</p>`;
 
-    md += `## Methodology\n\n`;
-    md += `Testing was conducted using industry-standard methodologies including PTES, OWASP WSTG, and MITRE ATT&CK framework. `;
-    md += `Evidence was collected using a combination of automated tools and manual testing techniques.\n\n`;
-    md += `---\n\n## Findings\n\n`;
+    h += `<h2 class="sub-title">Methodology</h2>
+<p>Testing was conducted using industry-standard methodologies including PTES, OWASP WSTG, and MITRE ATT&CK. Evidence was collected through a combination of automated tools and manual testing techniques.</p>
+</div>`;
 
+    // Findings
+    h += `<div class="section page-break"><h1 class="sec-title">Findings</h1>`;
     let findingNum = 1;
-    for (const { module, items } of moduleReports) {
-      const vulnItems = items.filter(i => {
-        const s = (this.app.state.itemStates[i.id] || {}).status;
-        return s === 'vulnerable';
-      });
-      if (vulnItems.length === 0) continue;
+    let anyFindings = false;
 
-      md += `### ${module.icon} ${module.name}\n\n`;
+    for (const { module, items } of moduleReports) {
+      const vulnItems = items.filter(i => (this.app.state.itemStates[i.id]||{}).status === 'vulnerable');
+      if (vulnItems.length === 0) continue;
+      anyFindings = true;
+
+      h += `<div class="mod-header"><span class="mod-icon">${module.icon}</span><span class="mod-name">${this._esc(module.name)}</span></div>`;
 
       for (const item of vulnItems) {
         const ist = this.app.state.itemStates[item.id] || {};
         const sev = ist.severityOverride || item.severity || 'medium';
-        md += `#### [F${String(findingNum).padStart(3,'0')}] ${item.title}\n\n`;
-        md += `**Severity:** ${sev.toUpperCase()}  \n`;
-        md += `**Status:** Vulnerable  \n`;
-        if (item.tags?.length) md += `**Tags:** ${item.tags.join(', ')}  \n`;
-        if (item.frameworks?.length) md += `**References:** ${item.frameworks.join(', ')}  \n`;
-        md += `\n**Description**\n\n${item.description}\n\n`;
-        if (ist.note) md += `**Observation / Evidence**\n\n${ist.note}\n\n`;
-        if (ist.evidence) md += `**Evidence**\n\n\`\`\`\n${ist.evidence}\n\`\`\`\n\n`;
-        const rem = ist.remediation || item.remediation;
-        if (rem) md += `**Remediation**\n\n${rem}\n\n`;
-        md += `---\n\n`;
+        h += `<div class="finding-card">
+<div class="finding-header">
+  <span class="finding-num">F${String(findingNum).padStart(3,'0')}</span>
+  <span class="finding-name">${this._esc(item.title)}</span>
+  <span class="badge b-${sev}">${sev}</span>
+</div>
+<div class="finding-body">
+  <div class="fld-row">
+    <div class="fld"><div class="fld-label">Status</div><div class="fld-value"><span class="badge b-vulnerable">Vulnerable</span></div></div>
+    ${item.tags?.length ? `<div class="fld"><div class="fld-label">Tags</div><div class="fld-value">${item.tags.map(t=>this._esc(t)).join(', ')}</div></div>` : ''}
+    ${item.frameworks?.length ? `<div class="fld"><div class="fld-label">References</div><div class="fld-value">${item.frameworks.map(f=>this._esc(f)).join(', ')}</div></div>` : ''}
+  </div>
+  <div class="fld"><div class="fld-label">Description</div><div class="fld-value">${this._esc(item.description)}</div></div>
+  ${ist.note ? `<div class="fld"><div class="fld-label">Observation</div><div class="fld-value">${this._esc(ist.note).replace(/\n/g,'<br>')}</div></div>` : ''}
+  ${ist.evidence ? `<div class="fld"><div class="fld-label">Evidence</div><div class="fld-value mono">${this._esc(ist.evidence)}</div></div>` : ''}
+  ${(ist.remediation||item.remediation) ? `<div class="fld"><div class="fld-label">Remediation</div><div class="fld-value">${this._esc(ist.remediation||item.remediation).replace(/\n/g,'<br>')}</div></div>` : ''}
+</div>
+</div>`;
         findingNum++;
       }
     }
 
-    // In-progress and cannot-verify
-    md += `## Observations (In Progress / Cannot Verify)\n\n`;
-    let obsCount = 0;
-    for (const { module, items } of moduleReports) {
-      const obsItems = items.filter(i => {
-        const s = (this.app.state.itemStates[i.id] || {}).status;
-        return s === 'in-progress' || s === 'cannot-verify';
-      });
-      if (obsItems.length === 0) continue;
-      md += `### ${module.name}\n\n`;
-      for (const item of obsItems) {
-        const ist = this.app.state.itemStates[item.id] || {};
-        md += `- **${item.title}** (${ist.status || 'in-progress'})`;
-        if (ist.note) md += `: ${ist.note}`;
-        md += `\n`;
-        obsCount++;
-      }
-      md += `\n`;
-    }
-    if (obsCount === 0) md += `_No observations in this category._\n\n`;
+    if (!anyFindings) h += `<div class="no-findings">No vulnerabilities were identified in the selected scope.</div>`;
+    h += `</div>`;
 
-    md += `## Recommendations\n\n`;
-    md += `The following prioritised recommendations address the identified vulnerabilities:\n\n`;
-    let recNum = 1;
+    // Observations
+    const obsModules = moduleReports.filter(({ items }) =>
+      items.some(i => { const s=(this.app.state.itemStates[i.id]||{}).status; return s==='in-progress'||s==='cannot-verify'; })
+    );
+    if (obsModules.length) {
+      h += `<div class="section page-break"><h1 class="sec-title">Observations</h1>`;
+      for (const { module, items } of obsModules) {
+        const obs = items.filter(i => { const s=(this.app.state.itemStates[i.id]||{}).status; return s==='in-progress'||s==='cannot-verify'; });
+        h += `<div class="mod-header"><span class="mod-icon">${module.icon}</span><span class="mod-name">${this._esc(module.name)}</span></div>`;
+        h += `<div class="obs-list">`;
+        for (const item of obs) {
+          const ist = this.app.state.itemStates[item.id]||{};
+          const lbl = ist.status==='cannot-verify' ? 'Cannot Verify' : 'In Progress';
+          h += `<div class="obs-item"><div class="obs-main"><div class="obs-title">${this._esc(item.title)}</div>${ist.note?`<div class="obs-note">${this._esc(ist.note)}</div>`:''}</div><span class="badge b-${ist.status}">${lbl}</span></div>`;
+        }
+        h += `</div>`;
+      }
+      h += `</div>`;
+    }
+
+    // Recommendations
     const allVuln = moduleReports.flatMap(({ module, items }) =>
-      items
-        .filter(i => (this.app.state.itemStates[i.id] || {}).status === 'vulnerable')
-        .map(i => ({ item: i, module }))
+      items.filter(i => (this.app.state.itemStates[i.id]||{}).status==='vulnerable').map(i => ({ item: i, module }))
     ).sort((a, b) => {
-      const order = { critical:0, high:1, medium:2, low:3, info:4 };
-      const sa = (this.app.state.itemStates[a.item.id] || {}).severityOverride || a.item.severity || 'medium';
-      const sb = (this.app.state.itemStates[b.item.id] || {}).severityOverride || b.item.severity || 'medium';
-      return (order[sa] ?? 5) - (order[sb] ?? 5);
-    });
+      const ord = { critical:0, high:1, medium:2, low:3, info:4 };
+      const sa = (this.app.state.itemStates[a.item.id]||{}).severityOverride || a.item.severity || 'medium';
+      const sb = (this.app.state.itemStates[b.item.id]||{}).severityOverride || b.item.severity || 'medium';
+      return (ord[sa]??5) - (ord[sb]??5);
+    }).filter(({ item }) => !!(this.app.state.itemStates[item.id]||{}).remediation || !!item.remediation);
 
-    for (const { item, module } of allVuln) {
-      const ist = this.app.state.itemStates[item.id] || {};
-      const rem = ist.remediation || item.remediation;
-      if (rem) {
-        md += `${recNum}. **[${module.name}] ${item.title}** — ${rem}\n`;
-        recNum++;
-      }
+    if (allVuln.length) {
+      h += `<div class="section page-break"><h1 class="sec-title">Recommendations</h1>
+<table><thead><tr><th>#</th><th>Finding</th><th>Severity</th><th>Recommended Action</th></tr></thead><tbody>`;
+      allVuln.forEach(({ item, module }, i) => {
+        const ist = this.app.state.itemStates[item.id]||{};
+        const sev = ist.severityOverride || item.severity || 'medium';
+        const rem = ist.remediation || item.remediation;
+        h += `<tr><td>${i+1}</td><td><strong>${this._esc(item.title)}</strong><br><span style="color:#888;font-size:8.5pt">${this._esc(module.name)}</span></td><td><span class="badge b-${sev}">${sev}</span></td><td>${this._esc(rem)}</td></tr>`;
+      });
+      h += `</tbody></table></div>`;
     }
 
-    md += `\n## Appendix: Module Coverage\n\n`;
-    md += `| Module | Total | Vulnerable | In Progress | Compliant | Not in Scope |\n|---|---|---|---|---|---|\n`;
+    // Appendix
+    h += `<div class="section page-break"><h1 class="sec-title">Appendix — Module Coverage</h1>
+<table><thead><tr><th>Module</th><th>Total</th><th>Vulnerable</th><th>In Progress</th><th>Compliant</th><th>Not In Scope</th><th>Cannot Verify</th></tr></thead><tbody>`;
     for (const { module, progress } of moduleReports) {
-      md += `| ${module.name} | ${progress.total} | ${progress.vulnerable} | ${progress.inProgress} | ${progress.compliant} | ${progress.notInScope} |\n`;
+      h += `<tr><td>${module.icon} ${this._esc(module.name)}</td><td>${progress.total}</td><td>${progress.vulnerable}</td><td>${progress.inProgress}</td><td>${progress.compliant}</td><td>${progress.notInScope}</td><td>${progress.cannotVerify}</td></tr>`;
     }
-    md += `\n`;
+    h += `</tbody></table></div>`;
 
-    return md;
+    return h;
   }
 
-  // ── Consultant / Compliance report ────────────────────────────────────────
+  // ── Consultant / Compliance report body ───────────────────────────────────
 
-  _generateConsultant(meta, moduleReports) {
-    const now = new Date().toISOString().slice(0, 10);
-    let md = '';
-    md += `# Cybersecurity Compliance Assessment Report\n\n`;
-    md += `| Field | Value |\n|---|---|\n`;
-    md += `| Project | ${meta.projectName || 'Untitled'} |\n`;
-    md += `| Client | ${meta.client || '—'} |\n`;
-    md += `| Assessor(s) | ${meta.assessor || '—'} |\n`;
-    md += `| Classification | ${meta.classification || 'CONFIDENTIAL'} |\n`;
-    md += `| Assessment Period | ${meta.startDate || '—'} to ${meta.endDate || '—'} |\n`;
-    md += `| Report Date | ${now} |\n\n`;
+  _buildConsultantBody(meta, moduleReports) {
+    const now = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
+    const version = meta.version || '1.0';
 
-    md += `---\n\n## Executive Summary\n\n`;
-    md += `This report presents the findings of a cybersecurity compliance assessment against the selected frameworks. `;
-    md += `The assessment identifies gaps, areas of compliance, and prioritised remediation recommendations.\n\n`;
+    let h = '';
 
-    md += `### Compliance Overview\n\n`;
-    md += `| Framework | Total Controls | Compliant | Gap / Partial | Not Assessed |\n|---|---|---|---|---|\n`;
+    // Cover
+    h += `<div class="cover">
+  <div class="cover-accent"></div>
+  <div class="cover-body">
+    <div class="cover-wordmark">⬡ SecWorkflow</div>
+    <div class="cover-report-type">Cybersecurity Compliance Assessment</div>
+    <h1 class="cover-title">${this._esc(meta.projectName || 'Compliance Assessment')}</h1>
+    <div class="cover-client">${this._esc(meta.client || '')}</div>
+    <div class="cover-divider"></div>
+    <div class="cover-meta">
+      <div class="cover-meta-key">Client</div><div class="cover-meta-val">${this._esc(meta.client || '—')}</div>
+      <div class="cover-meta-key">Assessor(s)</div><div class="cover-meta-val">${this._esc(meta.assessor || '—')}</div>
+      <div class="cover-meta-key">Period</div><div class="cover-meta-val">${this._esc(meta.startDate || '—')} – ${this._esc(meta.endDate || '—')}</div>
+      <div class="cover-meta-key">Report Date</div><div class="cover-meta-val">${now}</div>
+      <div class="cover-meta-key">Version</div><div class="cover-meta-val">${this._esc(version)}</div>
+      <div class="cover-meta-key">Classification</div><div class="cover-meta-val">${this._esc(meta.classification || 'CONFIDENTIAL')}</div>
+    </div>
+  </div>
+  <div class="cover-footer">
+    <div class="cover-classif">${this._esc(meta.classification || 'CONFIDENTIAL')}</div>
+    <div class="cover-generated">Generated ${now}</div>
+  </div>
+</div>`;
+
+    // Executive summary
+    h += `<div class="section page-break"><h1 class="sec-title">Executive Summary</h1>
+<p>This report presents the findings of a cybersecurity compliance assessment for <strong>${this._esc(meta.client || 'the organisation')}</strong>. It identifies control gaps, areas of compliance, and prioritised remediation recommendations.</p>
+<h2 class="sub-title">Compliance Overview</h2>
+<table><thead><tr><th>Framework / Domain</th><th>Total Controls</th><th>Compliant</th><th>Gap / Partial</th><th>Not Assessed</th></tr></thead><tbody>`;
     for (const { module, progress } of moduleReports) {
       const notAssessed = progress.notStarted + progress.inProgress;
-      md += `| ${module.name} | ${progress.total} | ${progress.compliant} | ${progress.vulnerable} | ${notAssessed} |\n`;
+      h += `<tr><td>${module.icon} ${this._esc(module.name)}</td><td>${progress.total}</td><td>${progress.compliant}</td><td>${progress.vulnerable}</td><td>${notAssessed}</td></tr>`;
     }
-    md += `\n`;
+    h += `</tbody></table>`;
+    if (meta.scope) h += `<h2 class="sub-title">Scope</h2><p>${this._esc(meta.scope).replace(/\n/g,'<br>')}</p>`;
+    h += `<h2 class="sub-title">Methodology</h2>
+<p>The assessment was conducted through document review, stakeholder interviews, and technical evidence review. Controls were rated as: <strong>Compliant</strong>, <strong>Gap Identified</strong>, <strong>In Progress</strong>, or <strong>Cannot Verify</strong>.</p>
+</div>`;
 
-    if (meta.scope) md += `## Scope\n\n${meta.scope}\n\n`;
-
-    md += `## Methodology\n\n`;
-    md += `The assessment was conducted through document review, interviews with key stakeholders, and technical evidence review. `;
-    md += `Controls were evaluated against the selected framework requirements and rated as: `;
-    md += `**Compliant**, **Gap Identified**, **In Progress** (partially implemented), or **Cannot Verify** (insufficient evidence).\n\n`;
-
-    md += `---\n\n## Key Findings and Gaps\n\n`;
-
+    // Findings
+    h += `<div class="section page-break"><h1 class="sec-title">Findings and Gaps</h1>`;
+    let anyGaps = false;
     for (const { module, items } of moduleReports) {
-      const gaps = items.filter(i => {
-        const s = (this.app.state.itemStates[i.id] || {}).status;
-        return s === 'vulnerable' || s === 'in-progress' || s === 'cannot-verify';
-      });
-      if (gaps.length === 0) continue;
+      const gaps = items.filter(i => { const s=(this.app.state.itemStates[i.id]||{}).status; return s==='vulnerable'||s==='in-progress'||s==='cannot-verify'; });
+      if (!gaps.length) continue;
+      anyGaps = true;
 
-      md += `### ${module.icon} ${module.name}\n\n`;
+      h += `<div class="mod-header"><span class="mod-icon">${module.icon}</span><span class="mod-name">${this._esc(module.name)}</span></div>`;
 
-      const byStatus = {
-        vulnerable: gaps.filter(i => (this.app.state.itemStates[i.id]||{}).status === 'vulnerable'),
-        'in-progress': gaps.filter(i => (this.app.state.itemStates[i.id]||{}).status === 'in-progress'),
-        'cannot-verify': gaps.filter(i => (this.app.state.itemStates[i.id]||{}).status === 'cannot-verify'),
-      };
-
-      if (byStatus.vulnerable.length) {
-        md += `#### Gaps Identified\n\n`;
-        for (const item of byStatus.vulnerable) {
-          const ist = this.app.state.itemStates[item.id] || {};
-          md += `**${item.title}**\n\n`;
-          md += `*Frameworks:* ${item.frameworks?.join(', ') || '—'}  \n`;
-          md += `*Description:* ${item.description}\n\n`;
-          if (ist.note) md += `*Assessment Notes:* ${ist.note}\n\n`;
+      const vulnItems = gaps.filter(i => (this.app.state.itemStates[i.id]||{}).status==='vulnerable');
+      if (vulnItems.length) {
+        h += `<h3 class="sub-sub">Gaps Identified</h3>`;
+        for (const item of vulnItems) {
+          const ist = this.app.state.itemStates[item.id]||{};
           const rem = ist.remediation || item.remediation;
-          if (rem) md += `*Recommended Action:* ${rem}\n\n`;
-          md += `---\n\n`;
+          h += `<div class="finding-card">
+<div class="finding-header"><span class="finding-name">${this._esc(item.title)}</span><span class="badge b-vulnerable">Gap</span></div>
+<div class="finding-body">
+  ${item.frameworks?.length ? `<div class="fld"><div class="fld-label">Framework References</div><div class="fld-value">${item.frameworks.map(f=>this._esc(f)).join(', ')}</div></div>` : ''}
+  <div class="fld"><div class="fld-label">Description</div><div class="fld-value">${this._esc(item.description)}</div></div>
+  ${ist.note ? `<div class="fld"><div class="fld-label">Assessment Notes</div><div class="fld-value">${this._esc(ist.note).replace(/\n/g,'<br>')}</div></div>` : ''}
+  ${rem ? `<div class="fld"><div class="fld-label">Recommended Action</div><div class="fld-value">${this._esc(rem).replace(/\n/g,'<br>')}</div></div>` : ''}
+</div></div>`;
         }
       }
 
-      if (byStatus['in-progress'].length) {
-        md += `#### Partially Implemented\n\n`;
-        for (const item of byStatus['in-progress']) {
-          const ist = this.app.state.itemStates[item.id] || {};
-          md += `- **${item.title}**`;
-          if (ist.note) md += `: ${ist.note}`;
-          md += `\n`;
+      const ipItems = gaps.filter(i => (this.app.state.itemStates[i.id]||{}).status==='in-progress');
+      if (ipItems.length) {
+        h += `<h3 class="sub-sub">Partially Implemented</h3><div class="obs-list">`;
+        for (const item of ipItems) {
+          const ist = this.app.state.itemStates[item.id]||{};
+          h += `<div class="obs-item"><div class="obs-main"><div class="obs-title">${this._esc(item.title)}</div>${ist.note?`<div class="obs-note">${this._esc(ist.note)}</div>`:''}</div><span class="badge b-in-progress">In Progress</span></div>`;
         }
-        md += `\n`;
+        h += `</div>`;
       }
 
-      if (byStatus['cannot-verify'].length) {
-        md += `#### Cannot Verify (insufficient evidence)\n\n`;
-        for (const item of byStatus['cannot-verify']) {
-          md += `- ${item.title}\n`;
+      const cvItems = gaps.filter(i => (this.app.state.itemStates[i.id]||{}).status==='cannot-verify');
+      if (cvItems.length) {
+        h += `<h3 class="sub-sub">Cannot Verify</h3><div class="obs-list">`;
+        for (const item of cvItems) {
+          h += `<div class="obs-item"><div class="obs-main"><div class="obs-title">${this._esc(item.title)}</div></div><span class="badge b-cannot-verify">Cannot Verify</span></div>`;
         }
-        md += `\n`;
+        h += `</div>`;
       }
     }
+    if (!anyGaps) h += `<div class="no-findings">No gaps or issues identified in the selected scope.</div>`;
+    h += `</div>`;
 
-    md += `## Prioritised Recommendations\n\n`;
-    md += `The following recommendations are prioritised by criticality:\n\n`;
+    // Recommendations
+    h += `<div class="section page-break"><h1 class="sec-title">Prioritised Recommendations</h1>
+<table><thead><tr><th>#</th><th>Control</th><th>Framework</th><th>Recommended Action</th></tr></thead><tbody>`;
     let recNum = 1;
     for (const { module, items } of moduleReports) {
-      const critItems = items.filter(i => (this.app.state.itemStates[i.id]||{}).status === 'vulnerable');
-      for (const item of critItems) {
-        const ist = this.app.state.itemStates[item.id] || {};
+      for (const item of items.filter(i => (this.app.state.itemStates[i.id]||{}).status==='vulnerable')) {
+        const ist = this.app.state.itemStates[item.id]||{};
         const rem = ist.remediation || item.remediation;
         if (rem) {
-          md += `${recNum}. **[${module.name}] ${item.title}** — ${rem}\n`;
+          h += `<tr><td>${recNum}</td><td>${this._esc(item.title)}</td><td>${(item.frameworks||[]).map(f=>this._esc(f)).join(', ')||'—'}</td><td>${this._esc(rem)}</td></tr>`;
           recNum++;
         }
       }
     }
+    if (recNum === 1) h += `<tr><td colspan="4" style="text-align:center;color:#aaa;padding:16pt">No remediation items with recommendations found.</td></tr>`;
+    h += `</tbody></table></div>`;
 
-    md += `\n## Compliance Gap Matrix\n\n`;
-    md += `| # | Control | Framework | Status | Note |\n|---|---|---|---|---|\n`;
+    // Gap Matrix
+    h += `<div class="section page-break"><h1 class="sec-title">Compliance Gap Matrix</h1>
+<table><thead><tr><th>#</th><th>Control</th><th>Framework</th><th>Status</th><th>Notes</th></tr></thead><tbody>`;
     let rowNum = 1;
     for (const { module, items } of moduleReports) {
       for (const item of items) {
-        const ist = this.app.state.itemStates[item.id] || {};
+        const ist = this.app.state.itemStates[item.id]||{};
         const status = ist.status || 'not-started';
         const statusLabel = STATUSES.find(s => s.value === status)?.label || status;
-        md += `| ${rowNum} | ${item.title} | ${item.frameworks?.join(', ') || '—'} | ${statusLabel} | ${ist.note || ''} |\n`;
+        h += `<tr><td>${rowNum}</td><td>${this._esc(item.title)}</td><td>${(item.frameworks||[]).map(f=>this._esc(f)).join(', ')||'—'}</td><td><span class="badge b-${status}">${this._esc(statusLabel)}</span></td><td style="color:#555">${this._esc(ist.note||'')}</td></tr>`;
         rowNum++;
       }
     }
-    md += `\n`;
+    h += `</tbody></table></div>`;
 
-    return md;
+    return h;
   }
 
-  // ── Executive summary ─────────────────────────────────────────────────────
+  // ── Executive summary body ────────────────────────────────────────────────
 
-  _generateExecutive(meta, moduleReports) {
-    const now = new Date().toISOString().slice(0, 10);
+  _buildExecutiveBody(meta, moduleReports) {
+    const now = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
     const totalVuln = this._countByStatus(moduleReports, 'vulnerable');
     const totalItems = moduleReports.reduce((s, { items }) => s + items.length, 0);
+    const version = meta.version || '1.0';
 
-    let md = `# Executive Summary\n\n`;
-    md += `**${meta.projectName || 'Security Assessment'} — ${meta.client || 'Client'}**  \n`;
-    md += `Date: ${now} | Assessor: ${meta.assessor || '—'} | Classification: ${meta.classification || 'CONFIDENTIAL'}\n\n`;
+    let h = '';
 
-    md += `## Overview\n\n`;
-    md += `A security assessment was conducted covering **${moduleReports.length} domain(s)**. `;
-    md += `Of **${totalItems} controls/checks evaluated**, **${totalVuln} gaps or vulnerabilities** were identified requiring remediation.\n\n`;
+    // Cover
+    h += `<div class="cover">
+  <div class="cover-accent"></div>
+  <div class="cover-body">
+    <div class="cover-wordmark">⬡ SecWorkflow</div>
+    <div class="cover-report-type">Executive Summary</div>
+    <h1 class="cover-title">${this._esc(meta.projectName || 'Security Assessment')}</h1>
+    <div class="cover-client">${this._esc(meta.client || '')}</div>
+    <div class="cover-divider"></div>
+    <div class="cover-meta">
+      <div class="cover-meta-key">Client</div><div class="cover-meta-val">${this._esc(meta.client || '—')}</div>
+      <div class="cover-meta-key">Assessor(s)</div><div class="cover-meta-val">${this._esc(meta.assessor || '—')}</div>
+      <div class="cover-meta-key">Date</div><div class="cover-meta-val">${now}</div>
+      <div class="cover-meta-key">Version</div><div class="cover-meta-val">${this._esc(version)}</div>
+      <div class="cover-meta-key">Classification</div><div class="cover-meta-val">${this._esc(meta.classification || 'CONFIDENTIAL')}</div>
+    </div>
+  </div>
+  <div class="cover-footer">
+    <div class="cover-classif">${this._esc(meta.classification || 'CONFIDENTIAL')}</div>
+    <div class="cover-generated">Generated ${now}</div>
+  </div>
+</div>`;
 
-    md += `## Domain Summary\n\n`;
-    md += `| Domain | Assessed | Issues | Status |\n|---|---|---|---|\n`;
+    h += `<div class="section page-break"><h1 class="sec-title">Overview</h1>
+<p>A security assessment was conducted for <strong>${this._esc(meta.client || 'the organisation')}</strong> covering <strong>${moduleReports.length} domain(s)</strong>. Of <strong>${totalItems} checks evaluated</strong>, <strong>${totalVuln} gap(s) or vulnerabilities</strong> were identified requiring remediation.</p>
+<h2 class="sub-title">Domain Summary</h2>
+<table><thead><tr><th>Domain</th><th>Total Checks</th><th>Issues Found</th><th>Compliant</th><th>Risk Level</th></tr></thead><tbody>`;
+
     for (const { module, items, progress } of moduleReports) {
-      const issues = items.filter(i => (this.app.state.itemStates[i.id]||{}).status === 'vulnerable').length;
+      const issues = items.filter(i => (this.app.state.itemStates[i.id]||{}).status==='vulnerable').length;
       const pct = progress.total > 0 ? Math.round((progress.compliant / progress.total) * 100) : 0;
-      const statusEmoji = issues > 0 ? (issues > 5 ? '🔴' : '🟠') : '🟢';
-      md += `| ${module.icon} ${module.name} | ${progress.total} | ${issues} | ${statusEmoji} ${pct}% compliant |\n`;
+      const riskBadge = issues === 0
+        ? '<span class="badge b-not-vulnerable">Low</span>'
+        : issues > 5
+          ? '<span class="badge b-critical">High</span>'
+          : '<span class="badge b-medium">Medium</span>';
+      h += `<tr><td>${module.icon} ${this._esc(module.name)}</td><td>${progress.total}</td><td>${issues}</td><td>${pct}%</td><td>${riskBadge}</td></tr>`;
     }
-    md += `\n`;
+    h += `</tbody></table>`;
 
-    md += `## Critical Actions Required\n\n`;
-    let actionNum = 1;
-    for (const { module, items } of moduleReports) {
-      for (const item of items) {
-        const ist = this.app.state.itemStates[item.id] || {};
-        const sev = ist.severityOverride || item.severity;
-        if (ist.status === 'vulnerable' && (sev === 'critical' || sev === 'high')) {
-          md += `${actionNum}. **${item.title}** (${module.name}) — Severity: ${sev?.toUpperCase()}\n`;
-          actionNum++;
-        }
-      }
+    const criticalItems = moduleReports.flatMap(({ module, items }) =>
+      items.filter(i => {
+        const ist = this.app.state.itemStates[i.id]||{};
+        const sev = ist.severityOverride || i.severity;
+        return ist.status==='vulnerable' && (sev==='critical'||sev==='high');
+      }).map(i => ({ item: i, module, sev: (this.app.state.itemStates[i.id]||{}).severityOverride || i.severity }))
+    );
+
+    h += `<h2 class="sub-title">Critical Actions Required</h2>`;
+    if (criticalItems.length) {
+      h += `<table><thead><tr><th>#</th><th>Finding</th><th>Domain</th><th>Severity</th></tr></thead><tbody>`;
+      criticalItems.forEach(({ item, module, sev }, i) => {
+        h += `<tr><td>${i+1}</td><td>${this._esc(item.title)}</td><td>${this._esc(module.name)}</td><td><span class="badge b-${sev}">${sev}</span></td></tr>`;
+      });
+      h += `</tbody></table>`;
+    } else {
+      h += `<p style="color:#059669;font-weight:600">✓ No critical or high severity items identified.</p>`;
     }
-    if (actionNum === 1) md += `_No critical or high severity items identified._\n`;
-    md += `\n`;
 
-    md += `## Next Steps\n\n`;
-    md += `1. Review this report with the security and IT leadership teams\n`;
-    md += `2. Prioritise remediation of critical and high findings\n`;
-    md += `3. Define ownership and target dates for all remediation actions\n`;
-    md += `4. Schedule follow-up assessment to verify remediation\n`;
-    md += `5. Update risk register with identified risks\n\n`;
+    h += `<h2 class="sub-title">Next Steps</h2>
+<ol>
+  <li>Review this report with the security and IT leadership teams</li>
+  <li>Prioritise remediation of critical and high findings</li>
+  <li>Define ownership and target dates for all remediation actions</li>
+  <li>Schedule a follow-up assessment to verify remediation effectiveness</li>
+  <li>Update the organisational risk register with all identified risks</li>
+</ol>
+</div>`;
 
-    return md;
+    return h;
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  _collectFindings(moduleReports, type) {
+  _esc(str) {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  _collectFindings(moduleReports) {
     return moduleReports.flatMap(({ module, items }) =>
-      items
-        .filter(i => (this.app.state.itemStates[i.id]||{}).status === 'vulnerable')
-        .map(i => ({ item: i, module }))
+      items.filter(i => (this.app.state.itemStates[i.id]||{}).status==='vulnerable').map(i => ({ item: i, module }))
     );
   }
 
   _countByStatus(moduleReports, status) {
     return moduleReports.reduce((sum, { items }) =>
-      sum + items.filter(i => (this.app.state.itemStates[i.id]||{}).status === status).length, 0);
+      sum + items.filter(i => (this.app.state.itemStates[i.id]||{}).status===status).length, 0);
   }
 
   _countBySeverity(findings) {
