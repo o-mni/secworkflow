@@ -4,6 +4,27 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SecWorkflow — Pentest & Consulting Checklist</title>
+
+  <!-- ── Security policies ─────────────────────────────────────────────── -->
+  <!-- CSP: no external connections, no framing, lock down base/form targets -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self';
+                 script-src 'self' 'unsafe-inline';
+                 style-src 'self' 'unsafe-inline';
+                 img-src 'self' data: blob:;
+                 font-src 'self';
+                 connect-src 'none';
+                 object-src 'none';
+                 base-uri 'self';
+                 form-action 'none';
+                 frame-ancestors 'none';" />
+  <!-- Strip referrer on all navigation -->
+  <meta name="referrer" content="no-referrer" />
+  <!-- Opt out of Google FLoC / Topics -->
+  <meta http-equiv="Permissions-Policy"
+        content="camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()" />
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
@@ -12,6 +33,14 @@
 <header class="topbar">
   <div class="topbar-left">
     <span class="logo">⬡ SecWorkflow</span>
+    <div class="topbar-divider"></div>
+    <div class="storage-mode-wrap">
+      <div class="storage-mode-toggle" role="group" aria-label="Storage Mode">
+        <button class="smt-btn active" id="smt-session" title="Session Mode — data is not saved; cleared on refresh or tab close">Session</button>
+        <button class="smt-btn" id="smt-local" title="Local Mode — data is saved in this browser on this device">Local</button>
+      </div>
+      <span class="smt-status" id="smt-status">Not saved</span>
+    </div>
   </div>
   <div class="topbar-center">
     <span class="breadcrumb-module" id="breadcrumb-text">Select a module</span>
@@ -43,6 +72,13 @@
           <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/></svg>
           Export Module MD
         </button>
+        <div id="dropdown-clear-data" style="display:none">
+          <div class="dropdown-divider"></div>
+          <button class="dropdown-item dropdown-item-danger" id="btn-clear-local-data">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/><path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/></svg>
+            Clear local data
+          </button>
+        </div>
       </div>
     </div>
 
@@ -140,6 +176,7 @@
 
     <!-- Module list -->
     <nav class="sidebar-nav" id="sidebar-nav"></nav>
+
   </aside>
 
   <!-- MAIN CONTENT -->
@@ -305,6 +342,9 @@
 
       </div>
     </div>
+    <div class="report-confidentiality-notice">
+      This report contains confidential findings. Do not print to a cloud service or send via unencrypted email.
+    </div>
     <div class="modal-footer">
       <button class="btn btn-ghost-modal" data-modal="modal-report">Cancel</button>
       <button class="btn btn-primary-modal" id="btn-generate-report">
@@ -395,6 +435,127 @@
   <div class="panel-footer">
     <button class="btn btn-ghost-modal" id="panel-close-btn">Discard</button>
     <button class="btn btn-primary-modal" id="panel-save-btn">Save</button>
+  </div>
+</div>
+
+<!-- Switch to Local Mode confirmation -->
+<div class="modal-overlay" id="modal-to-local" style="display:none">
+  <div class="modal modal-storage-modal">
+    <div class="modal-header">
+      <div class="modal-header-icon">💾</div>
+      <div>
+        <h2>Enable Local Storage?</h2>
+        <p class="modal-subtitle">Your data will be saved in this browser on this device.</p>
+      </div>
+      <button class="modal-close" data-modal="modal-to-local">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="storage-notice-block">
+        <div class="storage-notice-item">
+          Data will persist in this browser until you manually clear it or switch back to Session Mode. It is not encrypted.
+        </div>
+        <div class="storage-notice-item storage-notice-warn">
+          <strong>Do not store passwords, private keys, API tokens, session cookies, or any secrets.</strong>
+          This tool is for workflow notes, checklist progress, and findings drafts only.
+        </div>
+        <div class="storage-notice-item">
+          If your browser syncs data to a cloud account (Chrome Sync, Firefox Sync, etc.) your notes may be uploaded automatically. Disable sync or use Session Mode to avoid this.
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost-modal" data-modal="modal-to-local">Cancel — stay in Session Mode</button>
+      <button class="btn btn-warn-modal" id="btn-confirm-to-local">Enable Local Storage</button>
+    </div>
+  </div>
+</div>
+
+<!-- Switch to Session Mode confirmation -->
+<div class="modal-overlay" id="modal-to-session" style="display:none">
+  <div class="modal modal-storage-modal">
+    <div class="modal-header">
+      <div class="modal-header-icon">🔒</div>
+      <div>
+        <h2>Switch to Session Mode?</h2>
+        <p class="modal-subtitle">No new data will be written to local storage.</p>
+      </div>
+      <button class="modal-close" data-modal="modal-to-session">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="storage-notice-block">
+        <div class="storage-notice-item">
+          In Session Mode your current work stays in memory for this tab only. Refreshing or closing the tab will clear it. Previously saved local data is not automatically deleted.
+        </div>
+        <div class="storage-notice-item">
+          <strong>What do you want to do with your previously saved local data?</strong>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer modal-footer-stack">
+      <button class="btn btn-ghost-modal" data-modal="modal-to-session">Cancel — stay in Local Mode</button>
+      <button class="btn btn-ghost-modal" id="btn-confirm-to-session-keep">Switch — keep local data in browser</button>
+      <button class="btn btn-danger-modal" id="btn-confirm-to-session-clear">Switch — delete local data now</button>
+    </div>
+  </div>
+</div>
+
+<!-- Clear local data confirmation -->
+<div class="modal-overlay" id="modal-clear-data" style="display:none">
+  <div class="modal modal-storage-modal">
+    <div class="modal-header">
+      <div class="modal-header-icon">🗑️</div>
+      <div>
+        <h2>Clear all local data?</h2>
+        <p class="modal-subtitle">This action cannot be undone.</p>
+      </div>
+      <button class="modal-close" data-modal="modal-clear-data">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="storage-notice-block">
+        <div class="storage-notice-item storage-notice-danger">
+          All saved checklist progress, notes, evidence, and project metadata will be permanently deleted and the app will reset to its default state. Export a JSON backup first if you want to preserve your work.
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost-modal" data-modal="modal-clear-data">Cancel</button>
+      <button class="btn btn-danger-modal" id="btn-confirm-clear-data">Delete all local data</button>
+    </div>
+  </div>
+</div>
+
+<!-- Privacy Notice Modal (first run) -->
+<div class="modal-overlay privacy-overlay" id="modal-privacy" style="display:none">
+  <div class="modal modal-privacy-modal">
+    <div class="modal-header">
+      <div class="modal-header-icon">🔒</div>
+      <div>
+        <h2>Privacy &amp; Data Notice</h2>
+        <p class="modal-subtitle">Please read before you begin.</p>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="privacy-notice-block">
+        <div class="privacy-notice-item">
+          <strong>Session Mode is the default.</strong>
+          Data is held in memory only and cleared when you refresh or close this tab. Nothing is written to disk or transmitted anywhere — no analytics, no telemetry, no accounts.
+        </div>
+        <div class="privacy-notice-item">
+          <strong>Local Mode saves data in this browser.</strong>
+          You can switch to Local Mode using the <em>Session / Local</em> toggle in the top bar. In Local Mode, data persists across browser restarts but is not encrypted and may be uploaded by browser sync (Chrome Sync, Firefox Sync, etc.).
+        </div>
+        <div class="privacy-notice-item privacy-prohibited">
+          <strong>Do not record passwords, private keys, tokens, or secrets.</strong>
+          This tool is for workflow notes, checklist progress, and findings drafts — not a secrets vault.
+        </div>
+        <div class="privacy-notice-item">
+          <strong>To erase local data:</strong> use <em>Data → Clear local data</em> inside the app, or clear this site's data in your browser settings.
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary-modal" id="btn-privacy-dismiss">I understand — Continue</button>
+    </div>
   </div>
 </div>
 

@@ -552,3 +552,103 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
   line-height: 1.7;
 }
 .filter-empty-state strong { color: var(--text-main); }
+
+/* ── Storage Mode toggle (topbar) ────────────────────────────────── */
+.storage-mode-wrap {
+  display: flex; align-items: center; gap: 7px; flex-shrink: 0;
+}
+.storage-mode-toggle {
+  display: flex; background: rgba(255,255,255,.05); border-radius: 6px;
+  padding: 2px; border: 1px solid rgba(255,255,255,.1); gap: 2px;
+}
+.smt-btn {
+  padding: 3px 11px; border: none; background: none; border-radius: 4px;
+  font-size: 11.5px; font-weight: 600; color: var(--text-muted); cursor: pointer;
+  transition: all .15s; letter-spacing: .1px; white-space: nowrap;
+}
+.smt-btn:hover:not(.active) { color: var(--text-secondary); background: rgba(255,255,255,.06); }
+.smt-btn.active {
+  background: rgba(255,255,255,.12); color: var(--text-primary); box-shadow: 0 1px 3px rgba(0,0,0,.25);
+}
+/* Local button active = amber accent */
+#smt-local.active {
+  background: #d97706; color: #fff;
+}
+.smt-status {
+  font-size: 10px; color: var(--text-muted); white-space: nowrap;
+  letter-spacing: .1px;
+}
+
+/* Local Mode: amber left-border accent on the topbar */
+.topbar.topbar-local-mode {
+  border-bottom-color: #d97706;
+  background: linear-gradient(to right, rgba(217,119,6,.18) 0%, var(--bg-topbar) 380px);
+}
+.topbar.topbar-local-mode .smt-status {
+  color: #d97706;
+}
+
+/* ── Storage mode modal ───────────────────────────────────────────── */
+.modal-storage-modal { max-width: 500px; }
+.storage-notice-block { display: flex; flex-direction: column; gap: 10px; }
+.storage-notice-item {
+  font-size: 13px; color: var(--text-secondary); line-height: 1.6;
+  padding: 10px 12px; background: var(--bg-item); border-radius: 6px;
+  border: 1px solid var(--border-dark);
+}
+.storage-notice-item strong { color: var(--text-primary); }
+.storage-notice-warn {
+  border-color: rgba(217,119,6,.4); background: rgba(217,119,6,.07);
+}
+.storage-notice-warn strong { color: #d97706; }
+.storage-notice-danger {
+  border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.06);
+}
+
+/* Danger button variant */
+.btn-warn-modal {
+  padding: 8px 18px; border-radius: var(--radius-sm); border: none;
+  background: #d97706; color: #fff; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: background .12s;
+}
+.btn-warn-modal:hover { background: #b45309; }
+.btn-danger-modal {
+  padding: 8px 18px; border-radius: var(--radius-sm); border: none;
+  background: #dc2626; color: #fff; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: background .12s;
+}
+.btn-danger-modal:hover { background: #b91c1c; }
+
+/* Stack footer buttons vertically for the to-session modal */
+.modal-footer-stack {
+  flex-direction: column; align-items: stretch; gap: 8px;
+}
+.modal-footer-stack .btn-ghost-modal,
+.modal-footer-stack .btn-danger-modal { text-align: center; }
+
+/* Danger item in dropdown */
+.dropdown-item-danger { color: #ef4444 !important; }
+.dropdown-item-danger:hover { background: rgba(239,68,68,.1) !important; color: #ef4444 !important; }
+
+/* ── Privacy notice modal ─────────────────────────────────────────── */
+.modal-privacy-modal { max-width: 520px; }
+.privacy-notice-block { display: flex; flex-direction: column; gap: 12px; }
+.privacy-notice-item {
+  font-size: 13px; color: var(--text-secondary); line-height: 1.6;
+  padding: 10px 12px; background: var(--bg-item); border-radius: 6px;
+  border: 1px solid var(--border-dark);
+}
+.privacy-notice-item strong { color: var(--text-primary); display: block; margin-bottom: 3px; }
+.privacy-notice-item em { color: var(--accent); font-style: normal; }
+.privacy-notice-item code { font-family: monospace; font-size: 11.5px; color: var(--text-secondary); background: rgba(255,255,255,.05); padding: 1px 4px; border-radius: 3px; }
+.privacy-prohibited { border-color: rgba(239,68,68,.3); background: rgba(239,68,68,.06); }
+.privacy-prohibited strong { color: #ef4444; }
+
+/* ── Report confidentiality notice ───────────────────────────────── */
+.report-confidentiality-notice {
+  margin: 0 0 -4px; padding: 8px 20px;
+  font-size: 11px; color: var(--text-muted);
+  border-top: 1px solid var(--border-dark);
+  background: rgba(239,68,68,.04);
+  text-align: center;
+}

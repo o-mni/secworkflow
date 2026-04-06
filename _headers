@@ -1,0 +1,26 @@
+/*
+  # ── Enforce HTTPS ────────────────────────────────────────────────────────────
+  Strict-Transport-Security: max-age=63072000; includeSubDomains
+
+  # ── Framing & MIME sniffing ───────────────────────────────────────────────────
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  X-XSS-Protection: 1; mode=block
+
+  # ── Referrer & permissions ────────────────────────────────────────────────────
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()
+
+  # ── Content Security Policy ───────────────────────────────────────────────────
+  # - All resources from same origin only
+  # - No external network requests (connect-src none)
+  # - No plugin objects, no base-tag hijacking, no form submissions off-origin
+  # - No embedding in frames (frame-ancestors none supersedes X-Frame-Options)
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none';
+
+  # ── Cross-origin isolation ────────────────────────────────────────────────────
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+
+  # ── Cache: sensitive security tool — do not store in shared caches ────────────
+  Cache-Control: no-store, no-cache, must-revalidate

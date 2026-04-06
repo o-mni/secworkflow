@@ -1,6 +1,58 @@
 // ── SecWorkflow Application ───────────────────────────────────────────────────
 
-const STORAGE_KEY = 'secworkflow_v1';
+// ── Security utilities ────────────────────────────────────────────────────────
+
+/** HTML-escape a value before inserting into innerHTML. */
+function escHTML(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
+}
+
+const VALID_STATUSES   = new Set(['not-started','in-progress','not-vulnerable','vulnerable','not-in-scope','cannot-verify']);
+const VALID_SEVERITIES = new Set(['critical','high','medium','low','info']);
+
+/** Sanitise and validate a single item-state record from untrusted input (e.g. imported JSON). */
+function sanitiseItemState(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  return {
+    status:           VALID_STATUSES.has(raw.status)   ? raw.status           : 'not-started',
+    severityOverride: VALID_SEVERITIES.has(raw.severityOverride) ? raw.severityOverride : null,
+    note:             typeof raw.note        === 'string' ? raw.note.slice(0, 20000)        : '',
+    evidence:         typeof raw.evidence    === 'string' ? raw.evidence.slice(0, 100000)   : '',
+    remediation:      typeof raw.remediation === 'string' ? raw.remediation.slice(0, 20000) : '',
+    isFinding:        Boolean(raw.isFinding),
+    updatedAt:        typeof raw.updatedAt   === 'string' ? raw.updatedAt                   : '',
+  };
+}
+
+/** Sanitise project metadata from untrusted input. */
+function sanitiseMetadata(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const str = (v, max = 500) => (typeof v === 'string' ? v.slice(0, max) : '');
+  const VALID_CLASSIFS = new Set(['CONFIDENTIAL','TLP:RED','TLP:AMBER','TLP:GREEN','INTERNAL']);
+  return {
+    projectName:    str(raw.projectName, 200)  || 'Untitled Project',
+    client:         str(raw.client, 200)        || 'Client',
+    assessor:       str(raw.assessor, 300),
+    classification: VALID_CLASSIFS.has(raw.classification) ? raw.classification : 'CONFIDENTIAL',
+    version:        str(raw.version, 20)        || '1.0',
+    startDate:      /^\d{4}-\d{2}-\d{2}$/.test(raw.startDate) ? raw.startDate : '',
+    endDate:        /^\d{4}-\d{2}-\d{2}$/.test(raw.endDate)   ? raw.endDate   : '',
+    scope:          str(raw.scope, 5000),
+    exclusions:     str(raw.exclusions, 5000),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+const STORAGE_KEY      = 'secworkflow_v1';
+const STORAGE_MODE_KEY = 'secworkflow_storage_mode'; // 'session' (default) | 'local'
+const WELCOMED_KEY     = 'secworkflow_welcomed';
 const STATUS_LABELS = Object.fromEntries(STATUSES.map(s => [s.value, s.label]));
 const STATUS_COLORS = Object.fromEntries(STATUSES.map(s => [s.value, s.color]));
 
@@ -23,6 +75,7 @@ class SecWorkflowApp {
       itemStates: {},
       filters: { status: 'all', severity: 'all', tag: 'all', search: '', findingsOnly: false },
       filterBarOpen: false,
+      storageMode: localStorage.getItem(STORAGE_MODE_KEY) === 'local' ? 'local' : 'session',
     };
     this.panelItemId = null;
     this.reportGen = new ReportGenerator(this);
@@ -41,6 +94,8 @@ class SecWorkflowApp {
     if (this.state.currentModuleId) {
       this._loadModule(this.state.currentModuleId);
     }
+    this._syncStorageModeUI();
+    this._checkFirstRun();
   }
 
   _bindStaticEvents() {
@@ -131,13 +186,31 @@ class SecWorkflowApp {
 
     // Report modal
     document.getElementById('btn-generate-report').addEventListener('click', () => this._generateReport());
+
+    // Storage mode toggle
+    document.getElementById('smt-session').addEventListener('click', () => {
+      if (this.state.storageMode !== 'session') this._requestSwitchToSession();
+    });
+    document.getElementById('smt-local').addEventListener('click', () => {
+      if (this.state.storageMode !== 'local') this._requestSwitchToLocal();
+    });
+    document.getElementById('btn-confirm-to-local').addEventListener('click', () => this._confirmSwitchToLocal());
+    document.getElementById('btn-confirm-to-session-keep').addEventListener('click', () => this._confirmSwitchToSession(false));
+    document.getElementById('btn-confirm-to-session-clear').addEventListener('click', () => this._confirmSwitchToSession(true));
+    document.getElementById('btn-clear-local-data').addEventListener('click', () => this._requestClearLocalData());
+    document.getElementById('btn-confirm-clear-data').addEventListener('click', () => this._confirmClearLocalData());
+
+    // Privacy notice dismiss
+    document.getElementById('btn-privacy-dismiss').addEventListener('click', () => this._dismissPrivacyNotice());
   }
 
   // ── Storage ────────────────────────────────────────────────────────────────
 
   _saveToStorage() {
+    if (this.state.storageMode !== 'local') return; // Session Mode: no writes
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        version: 1,
         metadata: this.state.metadata,
         itemStates: this.state.itemStates,
         currentModuleId: this.state.currentModuleId,
@@ -147,6 +220,7 @@ class SecWorkflowApp {
   }
 
   _loadFromStorage() {
+    if (this.state.storageMode !== 'local') return; // Session Mode: start fresh
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
@@ -156,6 +230,92 @@ class SecWorkflowApp {
       if (saved.currentModuleId) this.state.currentModuleId = saved.currentModuleId;
       if (saved.currentType) this.state.currentType = saved.currentType;
     } catch (_) { /* ignore */ }
+  }
+
+  // ── Storage mode switching ─────────────────────────────────────────────────
+
+  _requestSwitchToLocal() {
+    document.getElementById('modal-to-local').style.display = 'flex';
+  }
+
+  _confirmSwitchToLocal() {
+    document.getElementById('modal-to-local').style.display = 'none';
+    this.state.storageMode = 'local';
+    localStorage.setItem(STORAGE_MODE_KEY, 'local');
+    this._saveToStorage(); // Persist current in-memory state immediately
+    this._syncStorageModeUI();
+    this._showToast('Local Mode enabled — data saved on this device', 'info');
+  }
+
+  _requestSwitchToSession() {
+    document.getElementById('modal-to-session').style.display = 'flex';
+  }
+
+  _confirmSwitchToSession(clearData) {
+    document.getElementById('modal-to-session').style.display = 'none';
+    this.state.storageMode = 'session';
+    localStorage.removeItem(STORAGE_MODE_KEY);
+    if (clearData) {
+      localStorage.removeItem(STORAGE_KEY);
+      this._showToast('Session Mode — local data deleted', 'info');
+    } else {
+      this._showToast('Session Mode — local data preserved but no longer updated', 'info');
+    }
+    this._syncStorageModeUI();
+  }
+
+  _requestClearLocalData() {
+    document.getElementById('modal-clear-data').style.display = 'flex';
+  }
+
+  _confirmClearLocalData() {
+    document.getElementById('modal-clear-data').style.display = 'none';
+    localStorage.removeItem(STORAGE_KEY);
+    // Reset in-memory state to defaults
+    this.state.metadata = {
+      projectName: 'Untitled Project', client: 'Client', assessor: '',
+      classification: 'CONFIDENTIAL', startDate: '', endDate: '',
+      scope: '', exclusions: '', version: '1.0',
+    };
+    this.state.itemStates = {};
+    this.state.currentModuleId = null;
+    this.state.currentType = 'pentest';
+    this._syncMetaToUI();
+    this._renderSidebar();
+    document.getElementById('welcome-screen').style.display = 'block';
+    document.getElementById('checklist-container').style.display = 'none';
+    this._closePanel();
+    this._showToast('All local data cleared — app reset to defaults', 'success');
+  }
+
+  _syncStorageModeUI() {
+    const isLocal = this.state.storageMode === 'local';
+
+    // Segmented control active state
+    document.getElementById('smt-session').classList.toggle('active', !isLocal);
+    document.getElementById('smt-local').classList.toggle('active', isLocal);
+
+    // Status label
+    document.getElementById('smt-status').textContent = isLocal
+      ? 'Saved on this device'
+      : 'Not saved';
+
+    // Topbar visual accent for Local Mode
+    document.querySelector('.topbar').classList.toggle('topbar-local-mode', isLocal);
+
+    // Show/hide clear-data option in Data dropdown
+    const clearEl = document.getElementById('dropdown-clear-data');
+    if (clearEl) clearEl.style.display = isLocal ? '' : 'none';
+  }
+
+  _checkFirstRun() {
+    if (localStorage.getItem(WELCOMED_KEY)) return;
+    document.getElementById('modal-privacy').style.display = 'flex';
+  }
+
+  _dismissPrivacyNotice() {
+    localStorage.setItem(WELCOMED_KEY, '1');
+    document.getElementById('modal-privacy').style.display = 'none';
   }
 
   // ── Sidebar ────────────────────────────────────────────────────────────────
@@ -311,7 +471,7 @@ class SecWorkflowApp {
     const sevBadge = sev ? `<span class="sev-badge sev-${sev}">${sev.toUpperCase()}</span>` : '';
     const tagBadges = (item.tags || []).slice(0, 4).map(t => `<span class="badge badge-tag">${t}</span>`).join('');
     const findingBadge = ist.isFinding ? `<span class="badge badge-finding">Finding</span>` : '';
-    const notePreview = ist.note ? `<div class="item-note-preview">📝 ${ist.note}</div>` : '';
+    const notePreview = ist.note ? `<div class="item-note-preview">📝 ${escHTML(ist.note)}</div>` : '';
 
     el.innerHTML = `
       <div class="item-status-col">
@@ -729,30 +889,54 @@ class SecWorkflowApp {
     const data = {
       version: 1,
       exportedAt: new Date().toISOString(),
+      appVersion: '1.0',
       metadata: this.state.metadata,
       itemStates: this.state.itemStates,
     };
-    const name = (this.state.metadata.projectName || 'secworkflow').replace(/\s+/g, '_').toLowerCase();
-    this._downloadFile(`${name}_${new Date().toISOString().slice(0,10)}.json`, JSON.stringify(data, null, 2), 'application/json');
+    const safeName = (this.state.metadata.projectName || 'secworkflow')
+      .replace(/[^a-zA-Z0-9_\-. ]/g, '_').replace(/\s+/g, '_').slice(0, 80).toLowerCase();
+    this._downloadFile(`${safeName}_${new Date().toISOString().slice(0,10)}.json`, JSON.stringify(data, null, 2), 'application/json');
     this._showToast('Exported JSON', 'success');
   }
 
   _importJSON(event) {
     const file = event.target.files[0];
     if (!file) return;
+
+    // Reject files that are clearly too large (> 5 MB)
+    if (file.size > 5 * 1024 * 1024) {
+      this._showToast('File too large (max 5 MB)', 'error');
+      event.target.value = '';
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const data = JSON.parse(e.target.result);
-        if (data.metadata) this.state.metadata = { ...this.state.metadata, ...data.metadata };
-        if (data.itemStates) this.state.itemStates = { ...this.state.itemStates, ...data.itemStates };
+        if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid structure');
+
+        // Sanitise metadata before merging
+        if (data.metadata) {
+          this.state.metadata = { ...this.state.metadata, ...sanitiseMetadata(data.metadata) };
+        }
+
+        // Sanitise every item-state record before merging
+        if (data.itemStates && typeof data.itemStates === 'object' && !Array.isArray(data.itemStates)) {
+          for (const [key, val] of Object.entries(data.itemStates)) {
+            if (typeof key === 'string' && key.length <= 200) {
+              this.state.itemStates[key] = sanitiseItemState(val);
+            }
+          }
+        }
+
         this._syncMetaToUI();
         this._saveToStorage();
         if (this.state.currentModuleId) this._loadModule(this.state.currentModuleId);
         this._renderSidebar();
         this._showToast('Data imported successfully', 'success');
       } catch (_) {
-        this._showToast('Invalid JSON file', 'error');
+        this._showToast('Invalid or malformed JSON file', 'error');
       }
     };
     reader.readAsText(file);
