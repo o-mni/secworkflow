@@ -905,14 +905,9 @@ class SecWorkflowApp {
     if (!isoStr) return '';
     try {
       const d = new Date(isoStr);
-      const now = new Date();
-      const isToday = d.toDateString() === now.toDateString();
-      const yest = new Date(now); yest.setDate(yest.getDate() - 1);
-      const isYest = d.toDateString() === yest.toDateString();
+      const date = d.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' });
       const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      if (isToday)  return `Today at ${time}`;
-      if (isYest)   return `Yesterday at ${time}`;
-      return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} at ${time}`;
+      return `${date} ${time}`;
     } catch (_) { return ''; }
   }
 
