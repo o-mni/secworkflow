@@ -13,7 +13,12 @@ function escHTML(str) {
     .replace(/'/g, '&#x27;');
 }
 
-const VALID_STATUSES   = new Set(['not-started','in-progress','not-vulnerable','vulnerable','not-in-scope','cannot-verify']);
+const VALID_STATUSES = new Set([
+  // Pentest statuses
+  'not-started','in-progress','not-vulnerable','vulnerable','not-in-scope','cannot-verify',
+  // Consultant statuses
+  'not-assessed','compliant','partially-compliant','not-compliant','not-applicable',
+]);
 const VALID_SEVERITIES = new Set(['critical','high','medium','low','info']);
 
 /** Sanitise and validate a single item-state record from untrusted input (e.g. imported JSON). */
@@ -26,6 +31,7 @@ function sanitiseItemState(raw) {
     evidence:         typeof raw.evidence    === 'string' ? raw.evidence.slice(0, 100000)   : '',
     remediation:      typeof raw.remediation === 'string' ? raw.remediation.slice(0, 20000) : '',
     isFinding:        Boolean(raw.isFinding),
+    outOfScope:       Boolean(raw.outOfScope),
     updatedAt:        typeof raw.updatedAt   === 'string' ? raw.updatedAt                   : '',
   };
 }
@@ -51,16 +57,24 @@ function sanitiseMetadata(raw) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STORAGE_KEY      = 'secworkflow_v1';
-const STORAGE_MODE_KEY = 'secworkflow_storage_mode'; // 'session' (default) | 'local'
+const STORAGE_MODE_KEY = 'secworkflow_storage_mode'; // 'session' | 'local' (local is default)
 const WELCOMED_KEY     = 'secworkflow_welcomed';
-const STATUS_LABELS = Object.fromEntries(STATUSES.map(s => [s.value, s.label]));
-const STATUS_COLORS = Object.fromEntries(STATUSES.map(s => [s.value, s.color]));
+
+// Build combined label/color maps from both status sets
+const ALL_STATUSES_COMBINED = [...STATUSES, ...CONSULTANT_STATUSES.filter(s => !STATUSES.find(p => p.value === s.value))];
+const STATUS_LABELS = Object.fromEntries(ALL_STATUSES_COMBINED.map(s => [s.value, s.label]));
+const STATUS_COLORS = Object.fromEntries(ALL_STATUSES_COMBINED.map(s => [s.value, s.color]));
 
 class SecWorkflowApp {
   constructor() {
+    // Default storage mode is 'local' — only fall back to session if explicitly set
+    const savedMode = localStorage.getItem(STORAGE_MODE_KEY);
+    const initialMode = savedMode === 'session' ? 'session' : 'local';
+
     this.state = {
       currentModuleId: null,
       currentType: 'pentest',
+      modeSelected: false,         // true once user has picked pentest or consultant
       metadata: {
         projectName: 'Untitled Project',
         client: 'Client',
@@ -73,9 +87,11 @@ class SecWorkflowApp {
         version: '1.0',
       },
       itemStates: {},
+      collapseStates: {},           // persists group collapse/expand per module
+      sortOrder: 'default',         // 'default' | 'severity' | 'status' | 'findings'
       filters: { status: 'all', severity: 'all', tag: 'all', search: '', findingsOnly: false },
       filterBarOpen: false,
-      storageMode: localStorage.getItem(STORAGE_MODE_KEY) === 'local' ? 'local' : 'session',
+      storageMode: initialMode,
     };
     this.panelItemId = null;
     this._sessionDirty = false;          // true when unsaved work exists in Session Mode
@@ -87,32 +103,58 @@ class SecWorkflowApp {
     this._init();
   }
 
+  // Returns the appropriate status list for the current assessment type
+  _getStatusesForType() {
+    return this.state.currentType === 'consultant' ? CONSULTANT_STATUSES : STATUSES;
+  }
+
   // ── Initialisation ─────────────────────────────────────────────────────────
 
   _init() {
     this._renderSidebar();
     this._populateTagFilter();
+    this._populateFilterStatuses();
     this._bindStaticEvents();
     this._syncMetaToUI();
 
-    if (this.state.currentModuleId) {
+    // If a mode was previously selected and a module loaded, restore it
+    if (this.state.modeSelected && this.state.currentModuleId) {
+      this._activateMode(this.state.currentType, false);
       this._loadModule(this.state.currentModuleId);
+    } else if (this.state.modeSelected) {
+      this._activateMode(this.state.currentType, false);
+      // Show welcome screen still (no module selected)
+      this._showWelcomeScreen();
+    } else {
+      this._showWelcomeScreen();
     }
     this._syncStorageModeUI();
+    this._syncSidebarModeBar();
     this._updateDocTitle();
     this._checkFirstRun();
   }
 
+  _showWelcomeScreen() {
+    document.getElementById('welcome-screen').style.display = '';
+    document.getElementById('checklist-container').style.display = 'none';
+  }
+
   _bindStaticEvents() {
-    // Sidebar type tabs
-    document.querySelectorAll('.sidebar-tab').forEach(btn => {
-      btn.addEventListener('click', () => {
-        this.state.currentType = btn.dataset.type;
-        document.querySelectorAll('.sidebar-tab').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        this._renderSidebar();
-        this._saveToStorage();
-      });
+    // Mode selector: "Change" button in sidebar returns to welcome screen
+    document.getElementById('btn-change-mode')?.addEventListener('click', () => {
+      this.state.modeSelected = false;
+      this.state.currentModuleId = null;
+      this._saveToStorage();
+      this._showWelcomeScreen();
+      this._syncSidebarModeBar();
+    });
+
+    // Sort order in sidebar
+    document.getElementById('sort-select')?.addEventListener('change', (e) => {
+      this.state.sortOrder = e.target.value;
+      if (this.state.currentModuleId) {
+        this._renderModule(MODULE_MAP[this.state.currentModuleId]);
+      }
     });
 
     // Top bar buttons
@@ -124,6 +166,12 @@ class SecWorkflowApp {
     document.getElementById('btn-export-md').addEventListener('click', () => this._exportMarkdown());
     document.getElementById('btn-report').addEventListener('click', () => this._openReportModal());
     document.getElementById('btn-project-meta').addEventListener('click', () => this._openMetaModal());
+
+    // Prominent Delete Local Data button
+    document.getElementById('btn-delete-data')?.addEventListener('click', () => this._requestClearLocalData());
+
+    // Welcome screen "Export Report" button
+    document.getElementById('btn-report-welcome')?.addEventListener('click', () => this._openReportModal());
 
     // Data dropdown toggle
     const dataMenuWrap = document.getElementById('data-menu-wrap');
@@ -192,7 +240,7 @@ class SecWorkflowApp {
     document.getElementById('panel-overlay').addEventListener('click', () => this._closePanel(true));
 
     // Mark panel dirty on any change (used to warn on close without saving)
-    ['panel-status', 'panel-severity', 'panel-notes', 'panel-evidence', 'panel-remediation', 'panel-is-finding'].forEach(id => {
+    ['panel-status', 'panel-severity', 'panel-notes', 'panel-evidence', 'panel-remediation', 'panel-is-finding', 'panel-out-of-scope'].forEach(id => {
       const el = document.getElementById(id);
       if (el) {
         el.addEventListener('input',  () => { this._panelDirty = true; });
@@ -220,7 +268,6 @@ class SecWorkflowApp {
     document.getElementById('btn-confirm-to-local').addEventListener('click', () => this._confirmSwitchToLocal());
     document.getElementById('btn-confirm-to-session-keep').addEventListener('click', () => this._confirmSwitchToSession(false));
     document.getElementById('btn-confirm-to-session-clear').addEventListener('click', () => this._confirmSwitchToSession(true));
-    document.getElementById('btn-clear-local-data').addEventListener('click', () => this._requestClearLocalData());
     document.getElementById('btn-confirm-clear-data').addEventListener('click', () => this._confirmClearLocalData());
 
     // Warn before unload when unsaved work exists in Session Mode
@@ -231,16 +278,12 @@ class SecWorkflowApp {
       }
     });
 
-    // Welcome card click → load first module of that type
-    document.querySelectorAll('.welcome-card[data-action]').forEach(card => {
+    // Welcome mode card click → activate mode and load first module
+    document.querySelectorAll('.welcome-mode-card[data-action]').forEach(card => {
       const activate = () => {
         const action = card.dataset.action;
         if (action === 'report') { this._openReportModal(); return; }
-        this.state.currentType = action;
-        document.querySelectorAll('.sidebar-tab').forEach(b => b.classList.toggle('active', b.dataset.type === action));
-        this._renderSidebar();
-        const mods = MODULES_BY_TYPE[action];
-        if (mods && mods.length > 0) this._loadModule(mods[0].id);
+        this._activateMode(action, true);
       };
       card.addEventListener('click', activate);
       card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } });
@@ -292,8 +335,10 @@ class SecWorkflowApp {
         version: 1,
         metadata: this.state.metadata,
         itemStates: this.state.itemStates,
+        collapseStates: this.state.collapseStates,
         currentModuleId: this.state.currentModuleId,
         currentType: this.state.currentType,
+        modeSelected: this.state.modeSelected,
         savedAt: now,
       }));
       // Live-update timestamps in topbar and sidebar
@@ -315,8 +360,10 @@ class SecWorkflowApp {
       const saved = JSON.parse(raw);
       if (saved.metadata) this.state.metadata = { ...this.state.metadata, ...saved.metadata };
       if (saved.itemStates) this.state.itemStates = saved.itemStates;
+      if (saved.collapseStates) this.state.collapseStates = saved.collapseStates;
       if (saved.currentModuleId) this.state.currentModuleId = saved.currentModuleId;
       if (saved.currentType) this.state.currentType = saved.currentType;
+      if (saved.modeSelected) this.state.modeSelected = saved.modeSelected;
     } catch (_) { /* ignore */ }
   }
 
@@ -343,7 +390,7 @@ class SecWorkflowApp {
   _confirmSwitchToSession(clearData) {
     document.getElementById('modal-to-session').style.display = 'none';
     this.state.storageMode = 'session';
-    localStorage.removeItem(STORAGE_MODE_KEY);
+    localStorage.setItem(STORAGE_MODE_KEY, 'session'); // explicitly mark session (local is default)
     if (clearData) {
       localStorage.removeItem(STORAGE_KEY);
       this._showToast('Session Mode — local data deleted', 'info');
@@ -367,14 +414,16 @@ class SecWorkflowApp {
       scope: '', exclusions: '', version: '1.0',
     };
     this.state.itemStates = {};
+    this.state.collapseStates = {};
     this.state.currentModuleId = null;
     this.state.currentType = 'pentest';
+    this.state.modeSelected = false;
     this._syncMetaToUI();
     this._renderSidebar();
+    this._syncSidebarModeBar();
     this._syncStorageModeUI();
     this._updateDocTitle();
-    document.getElementById('welcome-screen').style.display = 'block';
-    document.getElementById('checklist-container').style.display = 'none';
+    this._showWelcomeScreen();
     this._closePanel(true);
     this._showToast('All local data cleared — app reset to defaults', 'success');
   }
@@ -399,13 +448,10 @@ class SecWorkflowApp {
     // Topbar visual accent for Local Mode
     document.querySelector('.topbar').classList.toggle('topbar-local-mode', isLocal);
 
-    // Show/hide clear-data option in Data dropdown; disable if no data to clear
-    const clearEl = document.getElementById('dropdown-clear-data');
-    const clearBtn = document.getElementById('btn-clear-local-data');
-    if (clearEl) clearEl.style.display = (isLocal || hasLocalData) ? '' : 'none';
-    if (clearBtn) {
-      clearBtn.disabled = !hasLocalData;
-      clearBtn.classList.toggle('dropdown-item-disabled', !hasLocalData);
+    // Prominent Delete Local Data button — visible when there's local data
+    const deleteBtn = document.getElementById('btn-delete-data');
+    if (deleteBtn) {
+      deleteBtn.style.display = (isLocal && hasLocalData) ? '' : 'none';
     }
 
     // Sidebar project card: show last-saved timestamp in Local Mode
@@ -463,13 +509,62 @@ class SecWorkflowApp {
     document.getElementById('modal-privacy').style.display = 'none';
   }
 
+  // ── Mode activation ────────────────────────────────────────────────────────
+
+  _activateMode(type, loadFirst = true) {
+    this.state.currentType = type;
+    this.state.modeSelected = true;
+    this._populateFilterStatuses();
+    this._renderSidebar();
+    this._syncSidebarModeBar();
+    this._saveToStorage();
+
+    if (loadFirst) {
+      const mods = MODULES_BY_TYPE[type] || [];
+      if (mods.length > 0) this._loadModule(mods[0].id);
+    }
+  }
+
+  _syncSidebarModeBar() {
+    const bar = document.getElementById('sidebar-mode-bar');
+    const sortBar = document.getElementById('sidebar-sort-bar');
+    if (!bar) return;
+
+    if (this.state.modeSelected) {
+      bar.style.display = '';
+      if (sortBar) sortBar.style.display = '';
+      const icons = { pentest: '🔴', consultant: '📊' };
+      const labels = { pentest: 'Pentest Mode', consultant: 'Consultant Mode' };
+      document.getElementById('smb-mode-icon').textContent = icons[this.state.currentType] || '';
+      document.getElementById('smb-mode-text').textContent = labels[this.state.currentType] || '';
+    } else {
+      bar.style.display = 'none';
+      if (sortBar) sortBar.style.display = 'none';
+    }
+  }
+
+  // ── Populate filter status dropdown based on current mode ──────────────────
+
+  _populateFilterStatuses() {
+    const sel = document.getElementById('filter-status');
+    if (!sel) return;
+    const statuses = this._getStatusesForType();
+    sel.innerHTML = '<option value="all">All</option>' +
+      statuses.map(s => `<option value="${s.value}">${s.label}</option>`).join('');
+    // Reset filter if current value isn't valid for this mode
+    if (this.state.filters.status !== 'all' && !statuses.find(s => s.value === this.state.filters.status)) {
+      this.state.filters.status = 'all';
+    }
+    sel.value = this.state.filters.status;
+  }
+
   // ── Sidebar ────────────────────────────────────────────────────────────────
 
   _renderSidebar() {
     const nav = document.getElementById('sidebar-nav');
     const modules = MODULES_BY_TYPE[this.state.currentType] || [];
 
-    // Sync tab active state
+    // Sync hidden tabs for any legacy code references
     document.querySelectorAll('.sidebar-tab').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.type === this.state.currentType);
     });
@@ -531,9 +626,15 @@ class SecWorkflowApp {
   _renderModule(module) {
     const header = document.getElementById('module-header');
     const groups = document.getElementById('checklist-groups');
+    const isConsultant = this.state.currentType === 'consultant';
 
     // Header
     const progress = this.getModuleProgress(module);
+    const negativeColor = isConsultant ? STATUS_COLORS['not-compliant'] || STATUS_COLORS['vulnerable'] : STATUS_COLORS['vulnerable'];
+    const positiveColor = isConsultant ? STATUS_COLORS['compliant'] || STATUS_COLORS['not-vulnerable'] : STATUS_COLORS['not-vulnerable'];
+    const negativeLabel = isConsultant ? 'Non-Compliant' : 'Vulnerable';
+    const positiveLabel = isConsultant ? 'Compliant' : 'Compliant';
+
     header.innerHTML = `
       <div class="module-header-top">
         <div class="module-header-icon">${module.icon}</div>
@@ -543,25 +644,30 @@ class SecWorkflowApp {
         </div>
       </div>
       <div class="module-header-stats">
-        <div class="stat-pill"><span class="stat-pill-dot" style="background:${STATUS_COLORS['vulnerable']}"></span>${progress.vulnerable} Vulnerable</div>
+        <div class="stat-pill"><span class="stat-pill-dot" style="background:${negativeColor}"></span>${progress.vulnerable} ${negativeLabel}</div>
         <div class="stat-pill"><span class="stat-pill-dot" style="background:${STATUS_COLORS['in-progress']}"></span>${progress.inProgress} In Progress</div>
-        <div class="stat-pill"><span class="stat-pill-dot" style="background:${STATUS_COLORS['not-vulnerable']}"></span>${progress.compliant} Compliant</div>
+        <div class="stat-pill"><span class="stat-pill-dot" style="background:${positiveColor}"></span>${progress.compliant} ${positiveLabel}</div>
         <div class="stat-pill"><span class="stat-pill-dot" style="background:${STATUS_COLORS['not-started']}"></span>${progress.notStarted} Not Started</div>
-        <div class="stat-pill"><span class="stat-pill-dot" style="background:${STATUS_COLORS['cannot-verify']}"></span>${progress.cannotVerify} Cannot Verify</div>
+        <div class="stat-pill"><span class="stat-pill-dot" style="background:${STATUS_COLORS['cannot-verify']}"></span>${progress.cannotVerify} Unverified</div>
       </div>
     `;
 
     // Groups
     groups.innerHTML = '';
 
-    // First-time tip: show when no items have been touched yet
+    // First-time tip (dismissible)
+    const tipDismissed = localStorage.getItem('sw_tip_dismissed') === '1';
     const allPristine = module.groups.every(g =>
-      g.items.every(i => !this.state.itemStates[i.id] || this.state.itemStates[i.id].status === 'not-started')
+      g.items.every(i => !this.state.itemStates[i.id] || ['not-started','not-assessed'].includes(this.state.itemStates[i.id].status))
     );
-    if (allPristine) {
+    if (allPristine && !tipDismissed) {
       const tip = document.createElement('div');
       tip.className = 'module-first-tip';
-      tip.innerHTML = `<span class="module-first-tip-icon">💡</span> Click any row to open the detail panel — add notes, evidence, and set status. Use the dropdown on the right for a quick status change.`;
+      tip.innerHTML = `<span class="module-first-tip-icon">💡</span><span class="module-first-tip-text"> Click any row to open the detail panel — add notes, evidence, and set status. Use the chips on the right for a quick status change.</span><button class="module-first-tip-close" title="Dismiss" aria-label="Dismiss hint">✕</button>`;
+      tip.querySelector('.module-first-tip-close').addEventListener('click', () => {
+        localStorage.setItem('sw_tip_dismissed', '1');
+        tip.remove();
+      });
       groups.appendChild(tip);
     }
 
@@ -577,22 +683,53 @@ class SecWorkflowApp {
     container.className = 'checklist-group';
     container.dataset.groupId = group.id;
 
-    let completedCount = 0, vulnCount = 0, compliantCount = 0;
+    const isConsultant = this.state.currentType === 'consultant';
+    const notStartedVal = isConsultant ? 'not-assessed' : 'not-started';
+    const negativeVal   = isConsultant ? 'not-compliant' : 'vulnerable';
+    const positiveVal   = isConsultant ? 'compliant' : 'not-vulnerable';
+
+    let completedCount = 0, negCount = 0, posCount = 0;
     for (const i of group.items) {
-      const s = (this.state.itemStates[i.id] || {}).status || 'not-started';
-      if (s !== 'not-started') completedCount++;
-      if (s === 'vulnerable') vulnCount++;
-      else if (s === 'not-vulnerable') compliantCount++;
+      const s = (this.state.itemStates[i.id] || {}).status || notStartedVal;
+      if (s !== notStartedVal && s !== 'not-started') completedCount++;
+      if (s === negativeVal || s === 'vulnerable') negCount++;
+      else if (s === positiveVal || s === 'not-vulnerable') posCount++;
     }
     const pct = group.items.length > 0 ? (completedCount / group.items.length) * 100 : 0;
 
     const groupStatBits = [
-      vulnCount > 0 ? `<span class="group-stat"><span class="group-stat-dot" style="background:${STATUS_COLORS['vulnerable']}"></span>${vulnCount} vuln</span>` : '',
-      compliantCount > 0 ? `<span class="group-stat"><span class="group-stat-dot" style="background:${STATUS_COLORS['not-vulnerable']}"></span>${compliantCount} ok</span>` : '',
+      negCount > 0 ? `<span class="group-stat"><span class="group-stat-dot" style="background:${STATUS_COLORS[negativeVal]||STATUS_COLORS['vulnerable']}"></span>${negCount} ${isConsultant ? 'gaps' : 'vuln'}</span>` : '',
+      posCount > 0 ? `<span class="group-stat"><span class="group-stat-dot" style="background:${STATUS_COLORS[positiveVal]||STATUS_COLORS['not-vulnerable']}"></span>${posCount} ok</span>` : '',
     ].filter(Boolean).join('');
 
+    // Sort items based on current sort order
+    let items = [...group.items];
+    const sortOrder = { critical:0, high:1, medium:2, low:3, info:4 };
+    const statusOrder = { 'vulnerable':0, 'not-compliant':0, 'in-progress':1, 'cannot-verify':2, 'partially-compliant':2, 'not-started':3, 'not-assessed':3, 'not-in-scope':4, 'not-applicable':4, 'not-vulnerable':5, 'compliant':5 };
+    if (this.state.sortOrder === 'severity') {
+      items.sort((a, b) => {
+        const sa = (this.state.itemStates[a.id]||{}).severityOverride || a.severity || 'info';
+        const sb = (this.state.itemStates[b.id]||{}).severityOverride || b.severity || 'info';
+        return (sortOrder[sa]??5) - (sortOrder[sb]??5);
+      });
+    } else if (this.state.sortOrder === 'status') {
+      items.sort((a, b) => {
+        const sa = (this.state.itemStates[a.id]||{}).status || notStartedVal;
+        const sb = (this.state.itemStates[b.id]||{}).status || notStartedVal;
+        return (statusOrder[sa]??9) - (statusOrder[sb]??9);
+      });
+    } else if (this.state.sortOrder === 'findings') {
+      items.sort((a, b) => {
+        const fa = (this.state.itemStates[a.id]||{}).isFinding ? 0 : 1;
+        const fb = (this.state.itemStates[b.id]||{}).isFinding ? 0 : 1;
+        return fa - fb;
+      });
+    }
+
     const header = document.createElement('div');
-    header.className = 'group-header';
+    // Restore collapse state
+    const isCollapsed = !!this.state.collapseStates[group.id];
+    header.className = `group-header${isCollapsed ? ' collapsed' : ''}`;
     header.innerHTML = `
       <span class="group-header-title">${group.name}</span>
       ${groupStatBits ? `<span class="group-stat-row">${groupStatBits}</span>` : ''}
@@ -605,16 +742,19 @@ class SecWorkflowApp {
     progressBar.innerHTML = `<div class="group-progress-fill" style="width:${pct}%"></div>`;
 
     const itemsContainer = document.createElement('div');
-    itemsContainer.className = 'group-items';
+    itemsContainer.className = `group-items${isCollapsed ? ' collapsed' : ''}`;
     itemsContainer.dataset.groupId = group.id;
 
-    for (const item of group.items) {
+    for (const item of items) {
       itemsContainer.appendChild(this._renderItem(item));
     }
 
     header.addEventListener('click', () => {
-      header.classList.toggle('collapsed');
-      itemsContainer.classList.toggle('collapsed');
+      const nowCollapsed = header.classList.toggle('collapsed');
+      itemsContainer.classList.toggle('collapsed', nowCollapsed);
+      // Persist collapse state
+      this.state.collapseStates[group.id] = nowCollapsed;
+      this._saveToStorage();
     });
 
     container.appendChild(header);
@@ -625,22 +765,29 @@ class SecWorkflowApp {
 
   _renderItem(item) {
     const ist = this.state.itemStates[item.id] || {};
-    const status = ist.status || 'not-started';
+    const isConsultant = this.state.currentType === 'consultant';
+    const defaultStatus = isConsultant ? 'not-assessed' : 'not-started';
+    const status = ist.status || defaultStatus;
     const sev = ist.severityOverride || item.severity;
+    const outOfScope = ist.outOfScope || false;
 
     const el = document.createElement('div');
-    el.className = `checklist-item${ist.isFinding ? ' is-finding' : ''}`;
+    let classes = 'checklist-item';
+    if (ist.isFinding) classes += ' is-finding';
+    if (outOfScope) classes += ' is-out-of-scope';
+    el.className = classes;
     el.dataset.itemId = item.id;
     el.dataset.status = status;
     el.dataset.severity = sev || '';
     el.dataset.tags = (item.tags || []).join(',');
     el.dataset.isFinding = ist.isFinding ? '1' : '0';
 
-    const statusSelect = this._buildStatusSelect(item.id, status);
+    const statusChips = this._buildStatusChips(item.id, status);
     const sevBadge = sev ? `<span class="sev-badge sev-${sev}">${sev.toUpperCase()}</span>` : '';
-    const tagBadges = (item.tags || []).slice(0, 4).map(t => `<span class="badge badge-tag">${t}</span>`).join('');
+    const tagBadges = (item.tags || []).slice(0, 3).map(t => `<span class="badge badge-tag">${escHTML(t)}</span>`).join('');
     const findingBadge = ist.isFinding ? `<span class="badge badge-finding">Finding</span>` : '';
-    const notePreview = ist.note ? `<div class="item-note-preview">📝 ${escHTML(ist.note)}</div>` : '';
+    const scopeBadge = outOfScope ? `<span class="badge badge-out-of-scope">Out of scope</span>` : '';
+    const notePreview = ist.note ? `<div class="item-note-preview">📝 ${escHTML(ist.note.slice(0, 100))}${ist.note.length > 100 ? '…' : ''}</div>` : '';
 
     el.innerHTML = `
       <div class="item-status-col">
@@ -648,15 +795,15 @@ class SecWorkflowApp {
       </div>
       <div class="item-body">
         <div class="item-title-row">
-          <span class="item-title">${item.title}</span>
-          ${sevBadge}${findingBadge}
+          <span class="item-title">${escHTML(item.title)}</span>
+          ${sevBadge}${findingBadge}${scopeBadge}
         </div>
         <div class="item-tags">${tagBadges}</div>
-        <div class="item-desc">${item.description.slice(0, 120)}${item.description.length > 120 ? '…' : ''}</div>
+        <div class="item-desc">${escHTML(item.description.slice(0, 120))}${item.description.length > 120 ? '…' : ''}</div>
         ${notePreview}
       </div>
-      <div class="item-actions" onclick="event.stopPropagation()">
-        ${statusSelect}
+      <div class="item-actions">
+        ${statusChips}
       </div>
     `;
 
@@ -669,19 +816,21 @@ class SecWorkflowApp {
     return el;
   }
 
-  _buildStatusSelect(itemId, currentStatus) {
-    // Returns an HTML string. Changes handled via event delegation on #checklist-groups.
-    const options = STATUSES.map(s =>
-      `<option value="${s.value}"${s.value === currentStatus ? ' selected' : ''}>${s.label}</option>`
-    ).join('');
-    return `<select class="item-status-select ss-${currentStatus}" data-item-id="${itemId}">${options}</select>`;
+  _buildStatusChips(itemId, currentStatus) {
+    const statuses = this._getStatusesForType();
+    const chips = statuses.map(s => {
+      const isActive = s.value === currentStatus;
+      return `<button class="status-chip chip-${s.value}${isActive ? ' active-chip' : ''}" data-item-id="${itemId}" data-status="${s.value}" title="${escHTML(s.label)}">${escHTML(s.label)}</button>`;
+    }).join('');
+    return `<div class="item-status-chips">${chips}</div>`;
   }
 
   // ── Item State ────────────────────────────────────────────────────────────
 
   _updateItemState(itemId, field, value) {
     if (!this.state.itemStates[itemId]) {
-      this.state.itemStates[itemId] = { status: 'not-started', note: '', evidence: '', remediation: '', severityOverride: null, isFinding: false };
+      const defaultStatus = this.state.currentType === 'consultant' ? 'not-assessed' : 'not-started';
+      this.state.itemStates[itemId] = { status: defaultStatus, note: '', evidence: '', remediation: '', severityOverride: null, isFinding: false, outOfScope: false };
     }
     this.state.itemStates[itemId][field] = value;
     this.state.itemStates[itemId].updatedAt = new Date().toISOString();
@@ -694,16 +843,31 @@ class SecWorkflowApp {
   _openPanel(item) {
     this.panelItemId = item.id;
     const ist = this.state.itemStates[item.id] || {};
+    const isConsultant = this.state.currentType === 'consultant';
+    const defaultStatus = isConsultant ? 'not-assessed' : 'not-started';
 
     document.getElementById('panel-title').textContent = item.title;
     document.getElementById('panel-description').textContent = item.description;
 
-    // Status
+    // Note timestamp
+    const noteTs = document.getElementById('panel-note-ts');
+    if (noteTs && ist.updatedAt) {
+      try {
+        const d = new Date(ist.updatedAt);
+        noteTs.textContent = `Last edited ${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+      } catch (_) { noteTs.textContent = ''; }
+    } else if (noteTs) {
+      noteTs.textContent = '';
+    }
+
+    // Status — use context-appropriate status list
+    const statuses = this._getStatusesForType();
+    const currentStatus = ist.status || defaultStatus;
     const statusSel = document.getElementById('panel-status');
-    statusSel.innerHTML = STATUSES.map(s =>
-      `<option value="${s.value}"${(ist.status || 'not-started') === s.value ? ' selected' : ''}>${s.label}</option>`
+    statusSel.innerHTML = statuses.map(s =>
+      `<option value="${s.value}"${currentStatus === s.value ? ' selected' : ''}>${s.label}</option>`
     ).join('');
-    statusSel.className = `status-select panel-status ss-${ist.status || 'not-started'}`;
+    statusSel.className = `status-select panel-status ss-${currentStatus}`;
     statusSel.addEventListener('change', (e) => {
       statusSel.className = `status-select panel-status ss-${e.target.value}`;
     });
@@ -720,6 +884,10 @@ class SecWorkflowApp {
 
     // Finding checkbox
     document.getElementById('panel-is-finding').checked = ist.isFinding || false;
+
+    // Out of scope checkbox
+    const outOfScopeEl = document.getElementById('panel-out-of-scope');
+    if (outOfScopeEl) outOfScopeEl.checked = ist.outOfScope || false;
 
     // Tags
     const tagsEl = document.getElementById('panel-tags');
@@ -770,6 +938,7 @@ class SecWorkflowApp {
     const evidence = document.getElementById('panel-evidence').value.trim();
     const remediation = document.getElementById('panel-remediation').value.trim();
     const isFinding = document.getElementById('panel-is-finding').checked;
+    const outOfScope = document.getElementById('panel-out-of-scope')?.checked || false;
 
     this._updateItemState(id, 'status', status);
     this._updateItemState(id, 'severityOverride', severityOverride);
@@ -777,6 +946,7 @@ class SecWorkflowApp {
     this._updateItemState(id, 'evidence', evidence);
     this._updateItemState(id, 'remediation', remediation);
     this._updateItemState(id, 'isFinding', isFinding);
+    this._updateItemState(id, 'outOfScope', outOfScope);
 
     // Update the row in the DOM
     const row = document.querySelector(`.checklist-item[data-item-id="${id}"]`);
@@ -784,23 +954,27 @@ class SecWorkflowApp {
       row.dataset.status = status;
       row.dataset.isFinding = isFinding ? '1' : '0';
       row.classList.toggle('is-finding', isFinding);
+      row.classList.toggle('is-out-of-scope', outOfScope);
 
       const dot = row.querySelector('.status-dot');
       if (dot) dot.className = `status-dot status-${status}`;
 
-      const sel = row.querySelector('.item-status-select');
-      if (sel) {
-        sel.value = status;
-        sel.className = `item-status-select ss-${status}`;
+      // Update chips
+      const chipsEl = row.querySelector('.item-status-chips');
+      if (chipsEl) {
+        chipsEl.querySelectorAll('.status-chip').forEach(chip => {
+          chip.classList.toggle('active-chip', chip.dataset.status === status);
+        });
       }
 
       const notePreview = row.querySelector('.item-note-preview');
       if (note) {
-        if (notePreview) notePreview.textContent = `📝 ${note}`;
+        const previewText = `📝 ${note.slice(0, 100)}${note.length > 100 ? '…' : ''}`;
+        if (notePreview) notePreview.textContent = previewText;
         else {
           const nb = document.createElement('div');
           nb.className = 'item-note-preview';
-          nb.textContent = `📝 ${note}`;
+          nb.textContent = previewText;
           row.querySelector('.item-body').appendChild(nb);
         }
       } else if (notePreview) notePreview.remove();
@@ -816,17 +990,18 @@ class SecWorkflowApp {
   // ── Progress ──────────────────────────────────────────────────────────────
 
   getModuleProgress(module) {
+    const isConsultant = module.type === 'consultant';
     const counts = { total: 0, notStarted: 0, inProgress: 0, compliant: 0, vulnerable: 0, notInScope: 0, cannotVerify: 0 };
     for (const group of module.groups) {
       for (const item of group.items) {
         counts.total++;
-        const status = (this.state.itemStates[item.id] || {}).status || 'not-started';
-        if (status === 'not-started') counts.notStarted++;
+        const status = (this.state.itemStates[item.id] || {}).status || (isConsultant ? 'not-assessed' : 'not-started');
+        if (status === 'not-started' || status === 'not-assessed') counts.notStarted++;
         else if (status === 'in-progress') counts.inProgress++;
-        else if (status === 'not-vulnerable') counts.compliant++;
-        else if (status === 'vulnerable') counts.vulnerable++;
-        else if (status === 'not-in-scope') counts.notInScope++;
-        else if (status === 'cannot-verify') counts.cannotVerify++;
+        else if (status === 'not-vulnerable' || status === 'compliant') counts.compliant++;
+        else if (status === 'vulnerable' || status === 'not-compliant') counts.vulnerable++;
+        else if (status === 'not-in-scope' || status === 'not-applicable') counts.notInScope++;
+        else if (status === 'cannot-verify' || status === 'partially-compliant') counts.cannotVerify++;
       }
     }
     return counts;
@@ -1089,16 +1264,25 @@ class SecWorkflowApp {
   _openReportModal() {
     const container = document.getElementById('report-module-checkboxes');
     container.innerHTML = '';
-    for (const mod of ALL_MODULES) {
+    // Show only modules relevant to current type (or all if no mode selected)
+    const modsToShow = this.state.modeSelected
+      ? (MODULES_BY_TYPE[this.state.currentType] || ALL_MODULES)
+      : ALL_MODULES;
+    for (const mod of modsToShow) {
       const label = document.createElement('label');
       label.className = 'cb-label';
-      label.innerHTML = `<input type="checkbox" class="report-module-cb" value="${mod.id}" checked /> ${mod.icon} ${mod.name}`;
+      label.innerHTML = `<input type="checkbox" class="report-module-cb" value="${mod.id}" checked /> ${mod.icon} ${escHTML(mod.name)}`;
       container.appendChild(label);
     }
-    // Reset type cards to first option
-    document.querySelectorAll('.report-type-card').forEach((c, i) => c.classList.toggle('active', i === 0));
-    const firstRadio = document.querySelector('[name="report-type"]');
-    if (firstRadio) firstRadio.checked = true;
+    // Auto-select report type based on mode
+    const reportType = this.state.currentType === 'consultant' ? 'consultant' : 'pentest';
+    document.querySelectorAll('[name="report-type"]').forEach(radio => {
+      radio.checked = radio.value === reportType;
+    });
+    document.querySelectorAll('.report-type-card').forEach(c => {
+      const radio = c.querySelector('input[name="report-type"]');
+      c.classList.toggle('active', radio?.checked || false);
+    });
 
     document.getElementById('modal-report').style.display = 'flex';
   }
@@ -1261,20 +1445,31 @@ class SecWorkflowApp {
 document.addEventListener('DOMContentLoaded', () => {
   window.app = new SecWorkflowApp();
 
-  // Delegated change handler for inline status selects
-  document.getElementById('checklist-groups').addEventListener('change', (e) => {
-    if (!e.target.matches('.item-status-select')) return;
-    const itemId = e.target.dataset.itemId;
-    const row = e.target.closest('.checklist-item');
-    const newStatus = e.target.value;
-    if (!itemId) return;
+  // Delegated click handler for status chips
+  document.getElementById('checklist-groups').addEventListener('click', (e) => {
+    const chip = e.target.closest('.status-chip');
+    if (!chip) return;
+    e.stopPropagation();
+
+    const itemId = chip.dataset.itemId;
+    const newStatus = chip.dataset.status;
+    const row = chip.closest('.checklist-item');
+    if (!itemId || !newStatus) return;
+
     window.app._updateItemState(itemId, 'status', newStatus);
-    e.target.className = `item-status-select ss-${newStatus}`;
+
+    // Update all chips in this row
+    const chips = chip.closest('.item-status-chips');
+    if (chips) chips.querySelectorAll('.status-chip').forEach(c => {
+      c.classList.toggle('active-chip', c.dataset.status === newStatus);
+    });
+
     if (row) {
       row.dataset.status = newStatus;
       const dot = row.querySelector('.status-dot');
       if (dot) dot.className = `status-dot status-${newStatus}`;
     }
+
     window.app._updateProgress(MODULE_MAP[window.app.state.currentModuleId]);
     window.app._renderSidebar();
   });

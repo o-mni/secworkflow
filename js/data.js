@@ -3,6 +3,7 @@
 // Schema: Module > Group > Item (static definition)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Pentest statuses (default)
 const STATUSES = [
   { value: 'not-started',    label: 'Not Started',              color: '#6b7280' },
   { value: 'in-progress',    label: 'In Progress',              color: '#3b82f6' },
@@ -10,6 +11,16 @@ const STATUSES = [
   { value: 'vulnerable',     label: 'Vulnerable / Gap',         color: '#ef4444' },
   { value: 'not-in-scope',   label: 'Not in Scope',             color: '#9ca3af' },
   { value: 'cannot-verify',  label: 'Cannot Verify',            color: '#f59e0b' },
+];
+
+// Consultant-specific statuses (independent from pentest)
+const CONSULTANT_STATUSES = [
+  { value: 'not-assessed',        label: 'Not Assessed',        color: '#6b7280' },
+  { value: 'in-progress',         label: 'In Progress',         color: '#3b82f6' },
+  { value: 'compliant',           label: 'Compliant',           color: '#10b981' },
+  { value: 'partially-compliant', label: 'Partially Compliant', color: '#f59e0b' },
+  { value: 'not-compliant',       label: 'Not Compliant',       color: '#ef4444' },
+  { value: 'not-applicable',      label: 'Not Applicable',      color: '#9ca3af' },
 ];
 
 const SEVERITIES = ['critical','high','medium','low','info'];
@@ -713,10 +724,57 @@ const MODULE_ISO27001 = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// RECON MODULE
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MODULE_RECON = {
+  id: 'recon',
+  name: 'Reconnaissance',
+  type: 'pentest',
+  icon: '🔭',
+  description: 'Pre-engagement scanning, enumeration, and initial footprinting. Map the attack surface before active exploitation.',
+  groups: [
+    {
+      id: 'recon-osint',
+      name: 'OSINT & Passive Recon',
+      items: [
+        { id:'recon-001', title:'Domain & subdomain enumeration', description:'Enumerate subdomains via certificate transparency logs (crt.sh, Censys), DNS brute-force (dnsrecon, amass), and passive sources (Shodan, SecurityTrails). Identify forgotten or dev subdomains exposed to the internet.', severity:'medium', tags:['osint','dns','subdomain'], frameworks:['MITRE:T1590.001'], remediation:'Review and remove unused subdomains. Ensure dev/staging environments are not publicly accessible. Monitor certificate transparency logs.' },
+        { id:'recon-002', title:'Exposed credentials in public repositories', description:'Search GitHub, GitLab, and code repositories for leaked API keys, passwords, connection strings, and secrets using tools like truffleHog, gitleaks, or GitHub search operators.', severity:'critical', tags:['osint','credentials','github'], frameworks:['MITRE:T1552.001'], remediation:'Rotate any exposed credentials immediately. Implement git-secrets or pre-commit hooks. Enable GitHub secret scanning.' },
+        { id:'recon-003', title:'WHOIS and ASN intelligence', description:'Collect WHOIS records, ASN assignments, IP ranges, and organisational data. Identify IP space owned by the target. Cross-reference with BGP data for full IP inventory.', severity:'info', tags:['osint','whois','asn'], frameworks:['MITRE:T1590'], remediation:'Minimise public registration data. Use privacy-protected WHOIS registrations.' },
+        { id:'recon-004', title:'Employee & organisational OSINT', description:'Enumerate employees via LinkedIn, Hunter.io, and OSINT tools. Build username/email format list for credential spraying. Identify key personnel for social engineering or phishing simulation.', severity:'medium', tags:['osint','social-engineering','email'], frameworks:['MITRE:T1591.004'], remediation:'Train employees on OSINT risks. Minimise information published in job postings and org charts.' },
+        { id:'recon-005', title:'Technology fingerprinting', description:'Identify technologies, frameworks, CMS, CDN, WAF, load balancer, mail providers, and cloud platforms from passive sources: Wappalyzer, Shodan, BuiltWith, HTTP response headers.', severity:'info', tags:['osint','fingerprinting','technology'], frameworks:['MITRE:T1592'], remediation:'Suppress verbose server headers. Use generic error pages. Deploy WAF to obscure backend technology.' },
+      ],
+    },
+    {
+      id: 'recon-scanning',
+      name: 'Active Scanning',
+      items: [
+        { id:'recon-006', title:'Port and service scanning', description:'Perform full TCP/UDP port scan using Nmap (-sS -sU -p-). Identify open ports, running services, and versions. Prioritise unusual ports and services exposed externally.', severity:'medium', tags:['scanning','nmap','ports'], frameworks:['MITRE:T1046'], remediation:'Close unnecessary ports. Implement host-based and network firewalls. Document and justify all externally accessible services.' },
+        { id:'recon-007', title:'Service version and banner grabbing', description:'Identify exact versions of exposed services via banner grabbing (netcat, nmap -sV). Cross-reference with CVE databases to identify unpatched vulnerabilities in exposed services.', severity:'medium', tags:['scanning','banner-grab','versions'], frameworks:['MITRE:T1046'], remediation:'Suppress version banners in service configurations. Patch all exposed services to latest stable versions.' },
+        { id:'recon-008', title:'Web application discovery', description:'Discover web applications on non-standard ports. Run directory/file brute-force (feroxbuster, ffuf, dirsearch) using wordlists. Identify admin panels, API endpoints, backup files, and development artifacts.', severity:'medium', tags:['scanning','web','discovery'], frameworks:['MITRE:T1595.003'], remediation:'Remove or protect admin interfaces. Implement allowlist-based routing. Delete backup and development files from production.' },
+        { id:'recon-009', title:'SSL/TLS configuration analysis', description:'Analyse TLS configuration using sslyze, testssl.sh. Identify weak cipher suites, expired certificates, missing HSTS, vulnerable TLS versions (SSLv3, TLS 1.0/1.1), and certificate validity.', severity:'medium', tags:['scanning','ssl','tls'], frameworks:['MITRE:T1040'], remediation:'Enforce TLS 1.2+. Disable weak cipher suites. Enable HSTS with long max-age. Automate certificate renewal.' },
+        { id:'recon-010', title:'DNS zone transfer attempt', description:'Attempt AXFR/IXFR zone transfers from authoritative nameservers. A successful transfer reveals the entire DNS zone contents including internal hostnames and IP addresses.', severity:'high', tags:['scanning','dns','zone-transfer'], frameworks:['MITRE:T1590.002'], remediation:'Restrict zone transfers to authorised secondary nameservers only. Configure ACLs on DNS server.' },
+      ],
+    },
+    {
+      id: 'recon-enum',
+      name: 'Initial Enumeration',
+      items: [
+        { id:'recon-011', title:'Network topology mapping', description:'Map the network topology from discovered hosts. Identify routers, firewalls, load balancers, and network segmentation. Use traceroute, ping sweeps, and ARP scanning (if internal).', severity:'info', tags:['enumeration','network','topology'], frameworks:['MITRE:T1018'], remediation:'Implement network segmentation. Restrict ICMP and traceroute responses at perimeter.' },
+        { id:'recon-012', title:'Email security (SPF/DKIM/DMARC)', description:'Check SPF, DKIM, and DMARC records for all discovered domains. Identify missing or permissive policies that allow email spoofing. Test with external email spoofing simulation.', severity:'high', tags:['enumeration','email','spf','dmarc'], frameworks:['MITRE:T1566'], remediation:'Implement strict SPF (v=spf1 ... -all). Deploy DKIM signing. Set DMARC to p=reject with rua reporting.' },
+        { id:'recon-013', title:'Cloud asset discovery', description:'Identify cloud storage buckets (S3, Azure Blob, GCS), serverless functions, and cloud-hosted services. Check for publicly accessible or misconfigured cloud resources using cloudbrute, GrayhatWarfare.', severity:'high', tags:['enumeration','cloud','s3','azure'], frameworks:['MITRE:T1530'], remediation:'Enforce bucket ACLs. Disable public access at organisation policy level. Enable cloud audit logging.' },
+        { id:'recon-014', title:'Initial findings summary', description:'Document all discovered assets, services, technologies, and potential attack vectors before active exploitation begins. Create scope-in and scope-out lists based on findings.', severity:'info', tags:['enumeration','documentation','scope'], frameworks:[], remediation:'Maintain accurate asset inventory. Conduct regular attack surface reviews.' },
+      ],
+    },
+  ],
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MODULE REGISTRY
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ALL_MODULES = [
+  MODULE_RECON,
   MODULE_ACTIVE_DIRECTORY,
   MODULE_WINDOWS,
   MODULE_WEB_APP,

@@ -11,7 +11,7 @@ class ReportGenerator {
     const {
       type = 'pentest',
       includedModuleIds = [],
-      includeStatuses = ['vulnerable', 'in-progress', 'cannot-verify'],
+      includeStatuses = ['vulnerable', 'in-progress', 'cannot-verify', 'not-compliant', 'partially-compliant'],
       findingsOnly = false,
     } = options;
 
@@ -24,12 +24,17 @@ class ReportGenerator {
       if (!module) continue;
 
       const items = getModuleItems(module);
+      // Auto-filter: only include items that have meaningful data
       const filtered = items.filter(item => {
         const ist = state.itemStates[item.id] || {};
         const status = ist.status || 'not-started';
-        if (!includeStatuses.includes(status)) return false;
-        if (findingsOnly && !ist.isFinding && !ist.note) return false;
-        return true;
+        // Exclude out-of-scope items
+        if (ist.outOfScope) return false;
+        // Include if status matches OR if the item has notes/findings regardless of status
+        const statusMatch = includeStatuses.includes(status);
+        const hasData = ist.note || ist.evidence || ist.isFinding;
+        if (findingsOnly) return (ist.isFinding || (ist.note && statusMatch));
+        return statusMatch || (hasData && status !== 'not-started' && status !== 'not-assessed');
       });
 
       if (filtered.length === 0) continue;
@@ -83,11 +88,10 @@ class ReportGenerator {
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-@page { margin: 18mm 16mm; size: A4; }
-
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, Helvetica, sans-serif;
   font-size: 10.5pt; color: #1e1e2e; line-height: 1.65; background: #fff;
+  padding: 0 6mm;
 }
 
 /* ── Cover ── */
@@ -108,7 +112,7 @@ body {
 
 /* ── Section headings ── */
 .page-break { page-break-before: always; break-before: page; }
-.section { margin-bottom: 24pt; }
+.section { margin-bottom: 30pt; }
 
 h1.sec-title {
   font-size: 16pt; font-weight: 800; color: #0a0a18; letter-spacing: -.3pt;
@@ -186,18 +190,28 @@ tr:last-child td { border-bottom: none; }
 /* ── Empty state ── */
 .no-findings { text-align: center; padding: 28pt; color: #aaa; font-size: 10pt; background: #fafafa; border-radius: 8px; border: 1px solid #e5e7eb; }
 
+/* ── Page header / footer (printed) ── */
+@page {
+  size: A4;
+  margin: 22mm 20mm 28mm 20mm;
+  @bottom-left { content: "${this._esc(meta.projectName || 'Security Assessment')} — ${this._esc(meta.classification || 'CONFIDENTIAL')}"; font-size: 7.5pt; color: #aaa; font-family: sans-serif; }
+  @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 7.5pt; color: #aaa; font-family: sans-serif; }
+  @top-right { content: "⬡ SecWorkflow"; font-size: 7.5pt; color: #4c73f8; font-family: sans-serif; font-weight: bold; }
+}
+
 @media print {
   body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .page-break { page-break-before: always; }
   .finding-card { page-break-inside: avoid; }
   .cover { page-break-after: always; }
+  .obs-list { page-break-inside: avoid; }
 }
 </style>
 </head>
 <body>
 ${body}
 <script>
-setTimeout(function() { window.print(); }, 400);
+setTimeout(function() { window.print(); }, 450);
 </script>
 </body>
 </html>`;
@@ -315,36 +329,6 @@ setTimeout(function() { window.print(); }, 400);
       h += `</div>`;
     }
 
-    // Recommendations
-    const allVuln = moduleReports.flatMap(({ module, items }) =>
-      items.filter(i => (this.app.state.itemStates[i.id]||{}).status==='vulnerable').map(i => ({ item: i, module }))
-    ).sort((a, b) => {
-      const ord = { critical:0, high:1, medium:2, low:3, info:4 };
-      const sa = (this.app.state.itemStates[a.item.id]||{}).severityOverride || a.item.severity || 'medium';
-      const sb = (this.app.state.itemStates[b.item.id]||{}).severityOverride || b.item.severity || 'medium';
-      return (ord[sa]??5) - (ord[sb]??5);
-    }).filter(({ item }) => !!(this.app.state.itemStates[item.id]||{}).remediation || !!item.remediation);
-
-    if (allVuln.length) {
-      h += `<div class="section page-break"><h1 class="sec-title">Recommendations</h1>
-<table><thead><tr><th>#</th><th>Finding</th><th>Severity</th><th>Recommended Action</th></tr></thead><tbody>`;
-      allVuln.forEach(({ item, module }, i) => {
-        const ist = this.app.state.itemStates[item.id]||{};
-        const sev = ist.severityOverride || item.severity || 'medium';
-        const rem = ist.remediation || item.remediation;
-        h += `<tr><td>${i+1}</td><td><strong>${this._esc(item.title)}</strong><br><span style="color:#888;font-size:8.5pt">${this._esc(module.name)}</span></td><td><span class="badge b-${sev}">${sev}</span></td><td>${this._esc(rem)}</td></tr>`;
-      });
-      h += `</tbody></table></div>`;
-    }
-
-    // Appendix
-    h += `<div class="section page-break"><h1 class="sec-title">Appendix — Module Coverage</h1>
-<table><thead><tr><th>Module</th><th>Total</th><th>Vulnerable</th><th>In Progress</th><th>Compliant</th><th>Not In Scope</th><th>Cannot Verify</th></tr></thead><tbody>`;
-    for (const { module, progress } of moduleReports) {
-      h += `<tr><td>${module.icon} ${this._esc(module.name)}</td><td>${progress.total}</td><td>${progress.vulnerable}</td><td>${progress.inProgress}</td><td>${progress.compliant}</td><td>${progress.notInScope}</td><td>${progress.cannotVerify}</td></tr>`;
-    }
-    h += `</tbody></table></div>`;
-
     return h;
   }
 
@@ -395,86 +379,51 @@ setTimeout(function() { window.print(); }, 400);
 <p>The assessment was conducted through document review, stakeholder interviews, and technical evidence review. Controls were rated as: <strong>Compliant</strong>, <strong>Gap Identified</strong>, <strong>In Progress</strong>, or <strong>Cannot Verify</strong>.</p>
 </div>`;
 
-    // Findings
+    // Findings (gaps)
     h += `<div class="section page-break"><h1 class="sec-title">Findings and Gaps</h1>`;
     let anyGaps = false;
+    const negativeStatuses = ['not-compliant', 'vulnerable'];
+    const partialStatuses  = ['partially-compliant', 'in-progress', 'cannot-verify'];
+
     for (const { module, items } of moduleReports) {
-      const gaps = items.filter(i => { const s=(this.app.state.itemStates[i.id]||{}).status; return s==='vulnerable'||s==='in-progress'||s==='cannot-verify'; });
+      const gaps = items.filter(i => {
+        const s=(this.app.state.itemStates[i.id]||{}).status;
+        return negativeStatuses.includes(s) || partialStatuses.includes(s);
+      });
       if (!gaps.length) continue;
       anyGaps = true;
 
       h += `<div class="mod-header"><span class="mod-icon">${module.icon}</span><span class="mod-name">${this._esc(module.name)}</span></div>`;
 
-      const vulnItems = gaps.filter(i => (this.app.state.itemStates[i.id]||{}).status==='vulnerable');
-      if (vulnItems.length) {
-        h += `<h3 class="sub-sub">Gaps Identified</h3>`;
-        for (const item of vulnItems) {
+      const gapItems = gaps.filter(i => negativeStatuses.includes((this.app.state.itemStates[i.id]||{}).status));
+      if (gapItems.length) {
+        h += `<h3 class="sub-sub">Non-Compliant Controls</h3>`;
+        for (const item of gapItems) {
           const ist = this.app.state.itemStates[item.id]||{};
-          const rem = ist.remediation || item.remediation;
           h += `<div class="finding-card">
-<div class="finding-header"><span class="finding-name">${this._esc(item.title)}</span><span class="badge b-vulnerable">Gap</span></div>
+<div class="finding-header"><span class="finding-name">${this._esc(item.title)}</span><span class="badge b-not-compliant">Non-Compliant</span></div>
 <div class="finding-body">
   ${item.frameworks?.length ? `<div class="fld"><div class="fld-label">Framework References</div><div class="fld-value">${item.frameworks.map(f=>this._esc(f)).join(', ')}</div></div>` : ''}
   <div class="fld"><div class="fld-label">Description</div><div class="fld-value">${this._esc(item.description)}</div></div>
   ${ist.note ? `<div class="fld"><div class="fld-label">Assessment Notes</div><div class="fld-value">${this._esc(ist.note).replace(/\n/g,'<br>')}</div></div>` : ''}
-  ${rem ? `<div class="fld"><div class="fld-label">Recommended Action</div><div class="fld-value">${this._esc(rem).replace(/\n/g,'<br>')}</div></div>` : ''}
 </div></div>`;
         }
       }
 
-      const ipItems = gaps.filter(i => (this.app.state.itemStates[i.id]||{}).status==='in-progress');
-      if (ipItems.length) {
-        h += `<h3 class="sub-sub">Partially Implemented</h3><div class="obs-list">`;
-        for (const item of ipItems) {
+      const partialItems = gaps.filter(i => partialStatuses.includes((this.app.state.itemStates[i.id]||{}).status));
+      if (partialItems.length) {
+        h += `<h3 class="sub-sub">Partially Implemented / Unverified</h3><div class="obs-list">`;
+        for (const item of partialItems) {
           const ist = this.app.state.itemStates[item.id]||{};
-          h += `<div class="obs-item"><div class="obs-main"><div class="obs-title">${this._esc(item.title)}</div>${ist.note?`<div class="obs-note">${this._esc(ist.note)}</div>`:''}</div><span class="badge b-in-progress">In Progress</span></div>`;
-        }
-        h += `</div>`;
-      }
-
-      const cvItems = gaps.filter(i => (this.app.state.itemStates[i.id]||{}).status==='cannot-verify');
-      if (cvItems.length) {
-        h += `<h3 class="sub-sub">Cannot Verify</h3><div class="obs-list">`;
-        for (const item of cvItems) {
-          h += `<div class="obs-item"><div class="obs-main"><div class="obs-title">${this._esc(item.title)}</div></div><span class="badge b-cannot-verify">Cannot Verify</span></div>`;
+          const s = ist.status || 'in-progress';
+          const lbl = s === 'partially-compliant' ? 'Partial' : s === 'cannot-verify' ? 'Unverified' : 'In Progress';
+          h += `<div class="obs-item"><div class="obs-main"><div class="obs-title">${this._esc(item.title)}</div>${ist.note?`<div class="obs-note">${this._esc(ist.note)}</div>`:''}</div><span class="badge b-${s}">${lbl}</span></div>`;
         }
         h += `</div>`;
       }
     }
     if (!anyGaps) h += `<div class="no-findings">No gaps or issues identified in the selected scope.</div>`;
     h += `</div>`;
-
-    // Recommendations
-    h += `<div class="section page-break"><h1 class="sec-title">Prioritised Recommendations</h1>
-<table><thead><tr><th>#</th><th>Control</th><th>Framework</th><th>Recommended Action</th></tr></thead><tbody>`;
-    let recNum = 1;
-    for (const { module, items } of moduleReports) {
-      for (const item of items.filter(i => (this.app.state.itemStates[i.id]||{}).status==='vulnerable')) {
-        const ist = this.app.state.itemStates[item.id]||{};
-        const rem = ist.remediation || item.remediation;
-        if (rem) {
-          h += `<tr><td>${recNum}</td><td>${this._esc(item.title)}</td><td>${(item.frameworks||[]).map(f=>this._esc(f)).join(', ')||'—'}</td><td>${this._esc(rem)}</td></tr>`;
-          recNum++;
-        }
-      }
-    }
-    if (recNum === 1) h += `<tr><td colspan="4" style="text-align:center;color:#aaa;padding:16pt">No remediation items with recommendations found.</td></tr>`;
-    h += `</tbody></table></div>`;
-
-    // Gap Matrix
-    h += `<div class="section page-break"><h1 class="sec-title">Compliance Gap Matrix</h1>
-<table><thead><tr><th>#</th><th>Control</th><th>Framework</th><th>Status</th><th>Notes</th></tr></thead><tbody>`;
-    let rowNum = 1;
-    for (const { module, items } of moduleReports) {
-      for (const item of items) {
-        const ist = this.app.state.itemStates[item.id]||{};
-        const status = ist.status || 'not-started';
-        const statusLabel = STATUSES.find(s => s.value === status)?.label || status;
-        h += `<tr><td>${rowNum}</td><td>${this._esc(item.title)}</td><td>${(item.frameworks||[]).map(f=>this._esc(f)).join(', ')||'—'}</td><td><span class="badge b-${status}">${this._esc(statusLabel)}</span></td><td style="color:#555">${this._esc(ist.note||'')}</td></tr>`;
-        rowNum++;
-      }
-    }
-    h += `</tbody></table></div>`;
 
     return h;
   }
