@@ -32,8 +32,9 @@ class ReportGenerator {
         if (ist.outOfScope) return false;
         // Include if status matches OR if the item has notes/findings regardless of status
         const statusMatch = includeStatuses.includes(status);
-        const hasData = ist.note || ist.evidence || ist.isFinding;
-        if (findingsOnly) return (ist.isFinding || (ist.note && statusMatch));
+        const hasNotes = Array.isArray(ist.notes) && ist.notes.length > 0;
+        const hasData = hasNotes || ist.evidence || ist.isFinding;
+        if (findingsOnly) return (ist.isFinding || (hasNotes && statusMatch));
         return statusMatch || (hasData && status !== 'not-started' && status !== 'not-assessed');
       });
 
@@ -186,6 +187,10 @@ tr:last-child td { border-bottom: none; }
 .b-not-vulnerable{ background: #dcfce7; color: #166534; }
 .b-not-started   { background: #f3f4f6; color: #4b5563; }
 .b-not-in-scope  { background: #f3f4f6; color: #9ca3af; }
+.b-cve           { background: #ede9fe; color: #6d28d9; font-family: 'Cascadia Code', Consolas, monospace; letter-spacing: .2px; }
+.note-report-entry { padding: 4pt 0; border-bottom: 1px solid #f0f2f5; }
+.note-report-entry:last-child { border-bottom: none; }
+.note-report-ts { display: block; font-size: 7.5pt; color: #aaa; font-weight: 600; margin-bottom: 2pt; }
 
 /* ── Empty state ── */
 .no-findings { text-align: center; padding: 28pt; color: #aaa; font-size: 10pt; background: #fafafa; border-radius: 8px; border: 1px solid #e5e7eb; }
@@ -297,9 +302,9 @@ setTimeout(function() { window.print(); }, 450);
     ${item.frameworks?.length ? `<div class="fld"><div class="fld-label">References</div><div class="fld-value">${item.frameworks.map(f=>this._esc(f)).join(', ')}</div></div>` : ''}
   </div>
   <div class="fld"><div class="fld-label">Description</div><div class="fld-value">${this._esc(item.description)}</div></div>
-  ${ist.note ? `<div class="fld"><div class="fld-label">Observation</div><div class="fld-value">${this._esc(ist.note).replace(/\n/g,'<br>')}</div></div>` : ''}
+  ${(ist.notes||[]).length > 0 ? `<div class="fld"><div class="fld-label">Notes</div><div class="fld-value">${(ist.notes||[]).map(e=>`<div class="note-report-entry"><span class="note-report-ts">${this._esc(this._formatNoteTs(e.ts))}</span>${this._esc(e.text).replace(/\n/g,'<br>')}</div>`).join('')}</div></div>` : ''}
   ${ist.evidence ? `<div class="fld"><div class="fld-label">Evidence</div><div class="fld-value mono">${this._esc(ist.evidence)}</div></div>` : ''}
-  ${(ist.remediation||item.remediation) ? `<div class="fld"><div class="fld-label">Remediation</div><div class="fld-value">${this._esc(ist.remediation||item.remediation).replace(/\n/g,'<br>')}</div></div>` : ''}
+  ${(ist.cves||[]).length > 0 ? `<div class="fld"><div class="fld-label">CVEs</div><div class="fld-value">${(ist.cves||[]).map(c=>`<span class="badge b-cve">${this._esc(c)}</span>`).join(' ')}</div></div>` : ''}
 </div>
 </div>`;
         findingNum++;
@@ -322,7 +327,7 @@ setTimeout(function() { window.print(); }, 450);
         for (const item of obs) {
           const ist = this.app.state.itemStates[item.id]||{};
           const lbl = ist.status==='cannot-verify' ? 'Cannot Verify' : 'In Progress';
-          h += `<div class="obs-item"><div class="obs-main"><div class="obs-title">${this._esc(item.title)}</div>${ist.note?`<div class="obs-note">${this._esc(ist.note)}</div>`:''}</div><span class="badge b-${ist.status}">${lbl}</span></div>`;
+          h += `<div class="obs-item"><div class="obs-main"><div class="obs-title">${this._esc(item.title)}</div>${(ist.notes||[]).length>0?`<div class="obs-note">${this._esc(ist.notes[ist.notes.length-1].text)}</div>`:''}</div><span class="badge b-${ist.status}">${lbl}</span></div>`;
         }
         h += `</div>`;
       }
@@ -405,7 +410,7 @@ setTimeout(function() { window.print(); }, 450);
 <div class="finding-body">
   ${item.frameworks?.length ? `<div class="fld"><div class="fld-label">Framework References</div><div class="fld-value">${item.frameworks.map(f=>this._esc(f)).join(', ')}</div></div>` : ''}
   <div class="fld"><div class="fld-label">Description</div><div class="fld-value">${this._esc(item.description)}</div></div>
-  ${ist.note ? `<div class="fld"><div class="fld-label">Assessment Notes</div><div class="fld-value">${this._esc(ist.note).replace(/\n/g,'<br>')}</div></div>` : ''}
+  ${(ist.notes||[]).length>0 ? `<div class="fld"><div class="fld-label">Assessment Notes</div><div class="fld-value">${(ist.notes||[]).map(e=>`<div class="note-report-entry"><span class="note-report-ts">${this._esc(this._formatNoteTs(e.ts))}</span>${this._esc(e.text).replace(/\n/g,'<br>')}</div>`).join('')}</div></div>` : ''}
 </div></div>`;
         }
       }
@@ -417,7 +422,7 @@ setTimeout(function() { window.print(); }, 450);
           const ist = this.app.state.itemStates[item.id]||{};
           const s = ist.status || 'in-progress';
           const lbl = s === 'partially-compliant' ? 'Partial' : s === 'cannot-verify' ? 'Unverified' : 'In Progress';
-          h += `<div class="obs-item"><div class="obs-main"><div class="obs-title">${this._esc(item.title)}</div>${ist.note?`<div class="obs-note">${this._esc(ist.note)}</div>`:''}</div><span class="badge b-${s}">${lbl}</span></div>`;
+          h += `<div class="obs-item"><div class="obs-main"><div class="obs-title">${this._esc(item.title)}</div>${(ist.notes||[]).length>0?`<div class="obs-note">${this._esc(ist.notes[ist.notes.length-1].text)}</div>`:''}</div><span class="badge b-${s}">${lbl}</span></div>`;
         }
         h += `</div>`;
       }
@@ -511,6 +516,20 @@ setTimeout(function() { window.print(); }, 450);
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
+
+  _formatNoteTs(isoStr) {
+    if (!isoStr) return '';
+    try {
+      const d = new Date(isoStr);
+      const now = new Date();
+      const isToday = d.toDateString() === now.toDateString();
+      const yest = new Date(now); yest.setDate(yest.getDate() - 1);
+      const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      if (isToday) return `Today at ${time}`;
+      if (d.toDateString() === yest.toDateString()) return `Yesterday at ${time}`;
+      return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} at ${time}`;
+    } catch (_) { return ''; }
+  }
 
   _esc(str) {
     if (str == null) return '';

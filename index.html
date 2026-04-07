@@ -437,12 +437,30 @@
       <p class="panel-description" id="panel-description"></p>
     </div>
 
-    <div class="panel-section">
-      <div class="panel-label-row">
-        <label class="panel-label">Notes / Observations</label>
-        <span class="panel-note-ts" id="panel-note-ts"></span>
+    <div class="panel-section panel-section-notes">
+      <label class="panel-label">Notes</label>
+      <div class="panel-notes-thread" id="panel-notes-thread"></div>
+      <div class="panel-notes-compose">
+        <div class="panel-note-toolbar">
+          <button class="pnt-btn" data-fmt="bold" title="Bold (**text**)"><b>B</b></button>
+          <button class="pnt-btn" data-fmt="italic" title="Italic (*text*)"><i>I</i></button>
+          <span class="pnt-sep"></span>
+          <button class="pnt-btn" data-fmt="bullet" title="Bullet list">&#8226; List</button>
+          <button class="pnt-btn" data-fmt="code" title="Inline code">&#96;&#96;</button>
+        </div>
+        <textarea id="panel-notes-input" rows="3" placeholder="Add a note — findings, tool output, affected systems… (Ctrl+Enter to add)"></textarea>
+        <div class="panel-notes-compose-footer">
+          <button class="btn-add-note" id="panel-notes-add">+ Add Note</button>
+        </div>
       </div>
-      <textarea id="panel-notes" rows="5" placeholder="What did you find? Tool output summary, affected systems, impact… (supports **bold**, *italic*, - bullet lists)"></textarea>
+    </div>
+
+    <div class="panel-section">
+      <label class="panel-label">CVEs</label>
+      <div class="panel-cve-wrap" id="panel-cve-wrap">
+        <div class="panel-cve-chips" id="panel-cve-chips"></div>
+        <input type="text" id="panel-cves-input" class="panel-cve-input-bare" placeholder="CVE-2021-44228 — Enter or , to add" spellcheck="false" autocomplete="off" />
+      </div>
     </div>
 
     <div class="panel-section">
@@ -451,13 +469,8 @@
     </div>
 
     <div class="panel-section">
-      <label class="panel-label">Remediation Notes</label>
-      <textarea id="panel-remediation" rows="3" placeholder="Override or supplement the default remediation…"></textarea>
-    </div>
-
-    <div class="panel-section">
-      <label class="panel-label">Default Remediation</label>
-      <p class="panel-description muted" id="panel-default-remediation"></p>
+      <label class="panel-label">CVEs</label>
+      <input type="text" id="panel-cves" placeholder="CVE-2021-44228, CVE-2022-26134…" class="panel-cve-input" spellcheck="false" autocomplete="off" />
     </div>
 
     <div class="panel-section">

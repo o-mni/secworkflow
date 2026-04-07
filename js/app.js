@@ -27,9 +27,20 @@ function sanitiseItemState(raw) {
   return {
     status:           VALID_STATUSES.has(raw.status)   ? raw.status           : 'not-started',
     severityOverride: VALID_SEVERITIES.has(raw.severityOverride) ? raw.severityOverride : null,
-    note:             typeof raw.note        === 'string' ? raw.note.slice(0, 20000)        : '',
+    notes:            (() => {
+      if (Array.isArray(raw.notes)) {
+        return raw.notes.filter(e => e && typeof e.text === 'string').map(e => ({ text: e.text.slice(0, 50000), ts: typeof e.ts === 'string' ? e.ts : '' }));
+      }
+      // Migrate from old single-string note field
+      if (typeof raw.note === 'string' && raw.note) return [{ text: raw.note.slice(0, 50000), ts: typeof raw.updatedAt === 'string' ? raw.updatedAt : '' }];
+      return [];
+    })(),
     evidence:         typeof raw.evidence    === 'string' ? raw.evidence.slice(0, 100000)   : '',
-    remediation:      typeof raw.remediation === 'string' ? raw.remediation.slice(0, 20000) : '',
+    cves:             (() => {
+      if (Array.isArray(raw.cves)) return raw.cves.filter(c => typeof c === 'string' && c.trim()).map(c => c.trim().slice(0, 100));
+      if (typeof raw.cves === 'string' && raw.cves) return raw.cves.split(/[,\s]+/).map(c => c.trim()).filter(Boolean);
+      return [];
+    })(),
     isFinding:        Boolean(raw.isFinding),
     outOfScope:       Boolean(raw.outOfScope),
     updatedAt:        typeof raw.updatedAt   === 'string' ? raw.updatedAt                   : '',
@@ -98,6 +109,8 @@ class SecWorkflowApp {
     this._pendingImportFile = null;      // staged file waiting for import confirmation
     this._moduleCompleteToasted = false; // prevents repeat completion toasts per module
     this._panelDirty = false;            // true when panel has unsaved edits
+    this._panelNotes = [];               // working copy of notes for the open panel
+    this._panelCves  = [];               // working copy of CVEs for the open panel
     this.reportGen = new ReportGenerator(this);
     this._loadFromStorage();
     this._init();
@@ -240,12 +253,35 @@ class SecWorkflowApp {
     document.getElementById('panel-overlay').addEventListener('click', () => this._closePanel(true));
 
     // Mark panel dirty on any change (used to warn on close without saving)
-    ['panel-status', 'panel-severity', 'panel-notes', 'panel-evidence', 'panel-remediation', 'panel-is-finding', 'panel-out-of-scope'].forEach(id => {
+    ['panel-status', 'panel-severity', 'panel-notes-input', 'panel-evidence', 'panel-is-finding', 'panel-out-of-scope'].forEach(id => {
       const el = document.getElementById(id);
       if (el) {
         el.addEventListener('input',  () => { this._panelDirty = true; });
         el.addEventListener('change', () => { this._panelDirty = true; });
       }
+    });
+
+    // Add note — button click and Ctrl+Enter shortcut
+    document.getElementById('panel-notes-add').addEventListener('click', () => this._addNoteEntry());
+    document.getElementById('panel-notes-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); this._addNoteEntry(); }
+    });
+
+    // CVE tag input — Enter or comma to add
+    document.getElementById('panel-cves-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ',') {
+        e.preventDefault();
+        this._addCveChip(e.target.value);
+        e.target.value = '';
+      }
+    });
+    document.getElementById('panel-cves-input').addEventListener('blur', (e) => {
+      if (e.target.value.trim()) { this._addCveChip(e.target.value); e.target.value = ''; }
+    });
+
+    // Notes formatting toolbar
+    document.querySelectorAll('.pnt-btn').forEach(btn => {
+      btn.addEventListener('click', () => this._insertNoteFormat(btn.dataset.fmt));
     });
 
     // Prevent newlines in contenteditable project fields
@@ -787,7 +823,8 @@ class SecWorkflowApp {
     const tagBadges = (item.tags || []).slice(0, 3).map(t => `<span class="badge badge-tag">${escHTML(t)}</span>`).join('');
     const findingBadge = ist.isFinding ? `<span class="badge badge-finding">Finding</span>` : '';
     const scopeBadge = outOfScope ? `<span class="badge badge-out-of-scope">Out of scope</span>` : '';
-    const notePreview = ist.note ? `<div class="item-note-preview">📝 ${escHTML(ist.note.slice(0, 100))}${ist.note.length > 100 ? '…' : ''}</div>` : '';
+    const lastNote = Array.isArray(ist.notes) && ist.notes.length > 0 ? ist.notes[ist.notes.length - 1] : null;
+    const notePreview = lastNote ? `<div class="item-note-preview">📝 ${escHTML(lastNote.text.slice(0, 100))}${lastNote.text.length > 100 ? '…' : ''}</div>` : '';
 
     el.innerHTML = `
       <div class="item-status-col">
@@ -825,12 +862,141 @@ class SecWorkflowApp {
     return `<div class="item-status-chips">${chips}</div>`;
   }
 
+  _insertNoteFormat(fmt) {
+    const ta = document.getElementById('panel-notes-input');
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end   = ta.selectionEnd;
+    const sel   = ta.value.substring(start, end);
+    const pre   = ta.value.substring(0, start);
+    const post  = ta.value.substring(end);
+
+    let insert, cursorOffset;
+
+    if (fmt === 'bold') {
+      insert = sel ? `**${sel}**` : '****';
+      cursorOffset = sel ? insert.length : 2;
+    } else if (fmt === 'italic') {
+      insert = sel ? `*${sel}*` : '**';
+      cursorOffset = sel ? insert.length : 1;
+    } else if (fmt === 'code') {
+      insert = sel ? `\`${sel}\`` : '``';
+      cursorOffset = sel ? insert.length : 1;
+    } else if (fmt === 'bullet') {
+      if (sel && sel.includes('\n')) {
+        // Multi-line: prefix each line with "- "
+        insert = sel.split('\n').map(l => `- ${l}`).join('\n');
+        cursorOffset = insert.length;
+      } else {
+        // Single line: go to line start and prepend "- "
+        const lineStart = pre.lastIndexOf('\n') + 1;
+        const linePrefix = pre.substring(lineStart);
+        const realPre = pre.substring(0, lineStart);
+        insert = `- ${linePrefix}${sel}`;
+        ta.value = realPre + insert + post;
+        ta.selectionStart = ta.selectionEnd = lineStart + insert.length;
+        ta.focus();
+        ta.dispatchEvent(new Event('input'));
+        return;
+      }
+    }
+
+    ta.value = pre + insert + post;
+    ta.selectionStart = ta.selectionEnd = start + cursorOffset;
+    ta.focus();
+    ta.dispatchEvent(new Event('input'));
+  }
+
+  // ── Notes thread helpers ──────────────────────────────────────────────────
+
+  _formatNoteTs(isoStr) {
+    if (!isoStr) return '';
+    try {
+      const d = new Date(isoStr);
+      const now = new Date();
+      const isToday = d.toDateString() === now.toDateString();
+      const yest = new Date(now); yest.setDate(yest.getDate() - 1);
+      const isYest = d.toDateString() === yest.toDateString();
+      const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      if (isToday)  return `Today at ${time}`;
+      if (isYest)   return `Yesterday at ${time}`;
+      return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} at ${time}`;
+    } catch (_) { return ''; }
+  }
+
+  _addNoteEntry() {
+    const ta = document.getElementById('panel-notes-input');
+    const text = ta.value.trim();
+    if (!text) return;
+    this._panelNotes.push({ text, ts: new Date().toISOString() });
+    ta.value = '';
+    ta.style.height = '';
+    this._panelDirty = true;
+    this._renderNotesThread();
+  }
+
+  _renderNotesThread() {
+    const thread = document.getElementById('panel-notes-thread');
+    if (!thread) return;
+    if (this._panelNotes.length === 0) {
+      thread.innerHTML = '';
+      return;
+    }
+    thread.innerHTML = this._panelNotes.map((entry, idx) => `
+      <div class="note-entry" data-idx="${idx}">
+        <div class="note-entry-header">
+          <span class="note-entry-ts">${escHTML(this._formatNoteTs(entry.ts))}</span>
+          <button class="note-entry-delete" data-idx="${idx}" title="Delete this note">✕</button>
+        </div>
+        <div class="note-entry-text">${escHTML(entry.text)}</div>
+      </div>`).join('');
+    thread.querySelectorAll('.note-entry-delete').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const i = parseInt(btn.dataset.idx, 10);
+        this._panelNotes.splice(i, 1);
+        this._panelDirty = true;
+        this._renderNotesThread();
+      });
+    });
+    // Scroll to bottom to show latest entry
+    thread.scrollTop = thread.scrollHeight;
+  }
+
+  // ── CVE chip helpers ──────────────────────────────────────────────────────
+
+  _addCveChip(raw) {
+    const val = raw.trim().replace(/,$/, '').trim().toUpperCase();
+    if (!val) return;
+    // Accept with or without CVE- prefix; normalize
+    const cve = val.startsWith('CVE-') ? val : `CVE-${val}`;
+    if (this._panelCves.includes(cve)) return; // no duplicates
+    this._panelCves.push(cve);
+    this._panelDirty = true;
+    this._renderCveChips();
+  }
+
+  _renderCveChips() {
+    const wrap = document.getElementById('panel-cve-chips');
+    if (!wrap) return;
+    wrap.innerHTML = this._panelCves.map((cve, idx) =>
+      `<span class="cve-chip">${escHTML(cve)}<button class="cve-chip-remove" data-idx="${idx}" title="Remove">✕</button></span>`
+    ).join('');
+    wrap.querySelectorAll('.cve-chip-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this._panelCves.splice(parseInt(btn.dataset.idx, 10), 1);
+        this._panelDirty = true;
+        this._renderCveChips();
+      });
+    });
+  }
+
   // ── Item State ────────────────────────────────────────────────────────────
 
   _updateItemState(itemId, field, value) {
     if (!this.state.itemStates[itemId]) {
       const defaultStatus = this.state.currentType === 'consultant' ? 'not-assessed' : 'not-started';
-      this.state.itemStates[itemId] = { status: defaultStatus, note: '', evidence: '', remediation: '', severityOverride: null, isFinding: false, outOfScope: false };
+      this.state.itemStates[itemId] = { status: defaultStatus, notes: [], evidence: '', cves: [], severityOverride: null, isFinding: false, outOfScope: false };
     }
     this.state.itemStates[itemId][field] = value;
     this.state.itemStates[itemId].updatedAt = new Date().toISOString();
@@ -849,16 +1015,13 @@ class SecWorkflowApp {
     document.getElementById('panel-title').textContent = item.title;
     document.getElementById('panel-description').textContent = item.description;
 
-    // Note timestamp
-    const noteTs = document.getElementById('panel-note-ts');
-    if (noteTs && ist.updatedAt) {
-      try {
-        const d = new Date(ist.updatedAt);
-        noteTs.textContent = `Last edited ${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-      } catch (_) { noteTs.textContent = ''; }
-    } else if (noteTs) {
-      noteTs.textContent = '';
-    }
+    // Notes thread
+    this._panelNotes = Array.isArray(ist.notes) ? [...ist.notes] : [];
+    this._renderNotesThread();
+
+    // CVE chips
+    this._panelCves = Array.isArray(ist.cves) ? [...ist.cves] : [];
+    this._renderCveChips();
 
     // Status — use context-appropriate status list
     const statuses = this._getStatusesForType();
@@ -877,10 +1040,8 @@ class SecWorkflowApp {
     sevSel.value = ist.severityOverride || '';
 
     // Text fields
-    document.getElementById('panel-notes').value = ist.note || '';
+    document.getElementById('panel-notes-input').value = '';
     document.getElementById('panel-evidence').value = ist.evidence || '';
-    document.getElementById('panel-remediation').value = ist.remediation || '';
-    document.getElementById('panel-default-remediation').textContent = item.remediation || 'No default remediation specified.';
 
     // Finding checkbox
     document.getElementById('panel-is-finding').checked = ist.isFinding || false;
@@ -934,17 +1095,15 @@ class SecWorkflowApp {
 
     const status = document.getElementById('panel-status').value;
     const severityOverride = document.getElementById('panel-severity').value || null;
-    const note = document.getElementById('panel-notes').value.trim();
     const evidence = document.getElementById('panel-evidence').value.trim();
-    const remediation = document.getElementById('panel-remediation').value.trim();
     const isFinding = document.getElementById('panel-is-finding').checked;
     const outOfScope = document.getElementById('panel-out-of-scope')?.checked || false;
 
     this._updateItemState(id, 'status', status);
     this._updateItemState(id, 'severityOverride', severityOverride);
-    this._updateItemState(id, 'note', note);
+    this._updateItemState(id, 'notes', [...this._panelNotes]);
     this._updateItemState(id, 'evidence', evidence);
-    this._updateItemState(id, 'remediation', remediation);
+    this._updateItemState(id, 'cves', [...this._panelCves]);
     this._updateItemState(id, 'isFinding', isFinding);
     this._updateItemState(id, 'outOfScope', outOfScope);
 
@@ -967,9 +1126,10 @@ class SecWorkflowApp {
         });
       }
 
+      const lastNoteText = this._panelNotes.length > 0 ? this._panelNotes[this._panelNotes.length - 1].text : '';
       const notePreview = row.querySelector('.item-note-preview');
-      if (note) {
-        const previewText = `📝 ${note.slice(0, 100)}${note.length > 100 ? '…' : ''}`;
+      if (lastNoteText) {
+        const previewText = `📝 ${lastNoteText.slice(0, 100)}${lastNoteText.length > 100 ? '…' : ''}`;
         if (notePreview) notePreview.textContent = previewText;
         else {
           const nb = document.createElement('div');
@@ -1397,10 +1557,9 @@ class SecWorkflowApp {
         if (ist.isFinding) md += ` | 🔍 **Finding**`;
         md += `\n\n`;
         md += `${item.description}\n\n`;
-        if (ist.note) md += `**Notes:** ${ist.note}\n\n`;
+        if (ist.notes?.length > 0) { md += `**Notes:**\n`; ist.notes.forEach(e => { md += `- [${this._formatNoteTs(e.ts)}] ${e.text}\n`; }); md += '\n'; }
         if (ist.evidence) md += `**Evidence:**\n\`\`\`\n${ist.evidence}\n\`\`\`\n\n`;
-        const rem = ist.remediation || item.remediation;
-        if (rem) md += `**Remediation:** ${rem}\n\n`;
+        if (ist.cves?.length > 0) md += `**CVEs:** ${ist.cves.join(', ')}\n\n`;
         if (item.tags?.length) md += `**Tags:** ${item.tags.join(', ')}\n\n`;
         if (item.frameworks?.length) md += `**Frameworks:** ${item.frameworks.join(', ')}\n\n`;
         md += `---\n\n`;
