@@ -11,8 +11,6 @@ class ReportGenerator {
     const {
       type = 'pentest',
       includedModuleIds = [],
-      includeStatuses = ['vulnerable', 'in-progress', 'cannot-verify', 'not-compliant', 'partially-compliant'],
-      findingsOnly = false,
     } = options;
 
     const state = this.app.state;
@@ -24,18 +22,18 @@ class ReportGenerator {
       if (!module) continue;
 
       const items = getModuleItems(module);
-      // Auto-filter: only include items that have meaningful data
+      // Include any item that is not pristine-and-empty:
+      //   - has a non-default status, OR
+      //   - has notes, evidence, or is marked as a finding
+      // Always exclude out-of-scope items.
       const filtered = items.filter(item => {
         const ist = state.itemStates[item.id] || {};
-        const status = ist.status || 'not-started';
-        // Exclude out-of-scope items
         if (ist.outOfScope) return false;
-        // Include if status matches OR if the item has notes/findings regardless of status
-        const statusMatch = includeStatuses.includes(status);
+        const status = ist.status || 'not-started';
+        const pristine = status === 'not-started' || status === 'not-assessed';
         const hasNotes = Array.isArray(ist.notes) && ist.notes.length > 0;
-        const hasData = hasNotes || ist.evidence || ist.isFinding;
-        if (findingsOnly) return (ist.isFinding || (hasNotes && statusMatch));
-        return statusMatch || (hasData && status !== 'not-started' && status !== 'not-assessed');
+        const hasData = hasNotes || !!ist.evidence || !!ist.isFinding;
+        return !pristine || hasData;
       });
 
       if (filtered.length === 0) continue;

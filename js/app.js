@@ -177,14 +177,14 @@ class SecWorkflowApp {
     document.getElementById('import-file-input').addEventListener('change', e => this._stageImport(e));
     document.getElementById('btn-export-json').addEventListener('click', () => this._exportJSON());
     document.getElementById('btn-export-md').addEventListener('click', () => this._exportMarkdown());
-    document.getElementById('btn-report').addEventListener('click', () => this._openReportModal());
+    document.getElementById('btn-report').addEventListener('click', () => this._exportReport());
     document.getElementById('btn-project-meta').addEventListener('click', () => this._openMetaModal());
 
     // Prominent Delete Local Data button
     document.getElementById('btn-delete-data')?.addEventListener('click', () => this._requestClearLocalData());
 
     // Welcome screen "Export Report" button
-    document.getElementById('btn-report-welcome')?.addEventListener('click', () => this._openReportModal());
+    document.getElementById('btn-report-welcome')?.addEventListener('click', () => this._exportReport());
 
     // Data dropdown toggle
     const dataMenuWrap = document.getElementById('data-menu-wrap');
@@ -203,13 +203,6 @@ class SecWorkflowApp {
       document.getElementById('meta-classification').value = btn.dataset.value;
     });
 
-    // Report type card active state
-    document.getElementById('report-type-cards').addEventListener('change', (e) => {
-      if (e.target.name === 'report-type') {
-        document.querySelectorAll('.report-type-card').forEach(c => c.classList.remove('active'));
-        e.target.closest('.report-type-card').classList.add('active');
-      }
-    });
 
     // Filters
     document.getElementById('filter-status').addEventListener('change', e => { this.state.filters.status = e.target.value; this._applyFilters(); });
@@ -291,8 +284,7 @@ class SecWorkflowApp {
       });
     });
 
-    // Report modal
-    document.getElementById('btn-generate-report').addEventListener('click', () => this._generateReport());
+    // (report generated directly — no modal)
 
     // Storage mode toggle
     document.getElementById('smt-session').addEventListener('click', () => {
@@ -318,7 +310,7 @@ class SecWorkflowApp {
     document.querySelectorAll('.welcome-mode-card[data-action]').forEach(card => {
       const activate = () => {
         const action = card.dataset.action;
-        if (action === 'report') { this._openReportModal(); return; }
+        if (action === 'report') { this._exportReport(); return; }
         this._activateMode(action, true);
       };
       card.addEventListener('click', activate);
@@ -1419,48 +1411,15 @@ class SecWorkflowApp {
     }
   }
 
-  // ── Report modal ──────────────────────────────────────────────────────────
+  // ── Report export ─────────────────────────────────────────────────────────
 
-  _openReportModal() {
-    const container = document.getElementById('report-module-checkboxes');
-    container.innerHTML = '';
-    // Show only modules relevant to current type (or all if no mode selected)
-    const modsToShow = this.state.modeSelected
+  _exportReport() {
+    const type = this.state.currentType === 'consultant' ? 'consultant' : 'pentest';
+    const mods = this.state.modeSelected
       ? (MODULES_BY_TYPE[this.state.currentType] || ALL_MODULES)
       : ALL_MODULES;
-    for (const mod of modsToShow) {
-      const label = document.createElement('label');
-      label.className = 'cb-label';
-      label.innerHTML = `<input type="checkbox" class="report-module-cb" value="${mod.id}" checked /> ${mod.icon} ${escHTML(mod.name)}`;
-      container.appendChild(label);
-    }
-    // Auto-select report type based on mode
-    const reportType = this.state.currentType === 'consultant' ? 'consultant' : 'pentest';
-    document.querySelectorAll('[name="report-type"]').forEach(radio => {
-      radio.checked = radio.value === reportType;
-    });
-    document.querySelectorAll('.report-type-card').forEach(c => {
-      const radio = c.querySelector('input[name="report-type"]');
-      c.classList.toggle('active', radio?.checked || false);
-    });
-
-    document.getElementById('modal-report').style.display = 'flex';
-  }
-
-  _generateReport() {
-    const typeEl = document.querySelector('[name="report-type"]:checked');
-    const type = typeEl ? typeEl.value : 'pentest';
-    const includedModuleIds = [...document.querySelectorAll('.report-module-cb:checked')].map(el => el.value);
-    const includeStatuses = [...document.querySelectorAll('.report-status-filter:checked')].map(el => el.value);
-    const findingsOnly = document.getElementById('report-findings-only').checked;
-
-    if (includedModuleIds.length === 0) {
-      this._showToast('Select at least one module', 'info');
-      return;
-    }
-
-    document.getElementById('modal-report').style.display = 'none';
-    this.reportGen.generatePDF({ type, includedModuleIds, includeStatuses, findingsOnly });
+    const includedModuleIds = mods.map(m => m.id);
+    this.reportGen.generatePDF({ type, includedModuleIds });
     this._showToast('Opening PDF report…', 'success');
   }
 
