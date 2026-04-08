@@ -1024,12 +1024,10 @@ class SecWorkflowApp {
       toolbar.innerHTML = `
         <span class="custom-checks-toolbar-label">${totalChecks > 0 ? `${totalChecks} custom check${totalChecks !== 1 ? 's' : ''} across ${module.groups.length} group${module.groups.length !== 1 ? 's' : ''}` : 'No checks yet — add your own below.'}</span>
         <div class="custom-checks-toolbar-actions">
-          <button class="btn-toolbar-ghost" id="btn-add-custom-group">+ New Group</button>
           <button class="btn-toolbar-primary" id="btn-add-custom-check">+ Add Check</button>
         </div>
       `;
       toolbar.querySelector('#btn-add-custom-check').addEventListener('click', () => this._openCustomCheckModal());
-      toolbar.querySelector('#btn-add-custom-group').addEventListener('click', () => this._openAddGroupInline());
       groups.insertBefore(toolbar, groups.firstChild);
 
       // Empty state
