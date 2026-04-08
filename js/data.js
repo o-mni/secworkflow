@@ -770,6 +770,19 @@ const MODULE_RECON = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CUSTOM CHECKS MODULE (dynamic — groups populated from app state at runtime)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MODULE_CUSTOM = {
+  id: 'custom-checks',
+  name: 'Custom Checks',
+  type: 'pentest',
+  icon: '✏️',
+  description: 'Your own custom penetration test checks and findings. Add groups and items as needed.',
+  groups: [], // populated dynamically from state.customGroups
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MODULE REGISTRY
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -784,6 +797,7 @@ const ALL_MODULES = [
   MODULE_WIRELESS,
   MODULE_PHYSICAL,
   MODULE_CLOUD,
+  MODULE_CUSTOM,
   MODULE_NIS2,
   MODULE_NIST_CSF,
   MODULE_DORA,

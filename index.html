@@ -588,6 +588,78 @@
   </div>
 </div>
 
+<!-- Add / Edit Custom Check modal -->
+<div class="modal-overlay" id="modal-custom-check" style="display:none">
+  <div class="modal modal-custom-check-modal">
+    <div class="modal-header">
+      <div class="modal-header-icon" id="modal-custom-check-icon">✏️</div>
+      <div style="flex:1;min-width:0">
+        <h2 id="modal-custom-check-title">Add Custom Check</h2>
+        <p class="modal-subtitle" id="modal-custom-check-subtitle">Add a check item to your pentest checklist.</p>
+      </div>
+      <button class="modal-close" data-modal="modal-custom-check">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="custom-check-edit-id" value="">
+
+      <div class="form-grid">
+        <!-- Title -->
+        <div class="form-group form-full">
+          <label for="custom-check-title-input">Title <span class="field-required">*</span></label>
+          <input id="custom-check-title-input" placeholder="e.g. Check for default credentials on admin panel" maxlength="200" autocomplete="off">
+        </div>
+
+        <!-- Group row -->
+        <div class="form-group form-full" id="custom-group-field">
+          <label for="custom-check-group">Group</label>
+          <div class="custom-group-select-row">
+            <select id="custom-check-group"></select>
+            <button class="btn-new-group-inline" id="btn-custom-new-group" type="button" title="Create a new group">+ New group</button>
+          </div>
+          <div class="custom-new-group-inline" id="custom-new-group-row" style="display:none">
+            <input id="custom-new-group-name" placeholder="Group name…" maxlength="100" autocomplete="off">
+            <button class="btn-create-group-confirm" id="btn-confirm-new-group" type="button">Create</button>
+            <button class="btn-create-group-cancel" id="btn-cancel-new-group" type="button">✕</button>
+          </div>
+        </div>
+
+        <!-- Description -->
+        <div class="form-group form-full">
+          <label for="custom-check-description">Description <span class="field-optional">optional</span></label>
+          <textarea id="custom-check-description" rows="3" placeholder="Steps, tools, context, what to look for…" maxlength="2000"></textarea>
+        </div>
+
+        <!-- Severity -->
+        <div class="form-group form-full">
+          <label>Severity</label>
+          <div class="sev-picker" id="custom-sev-picker">
+            <button class="sev-pick-btn sev-pick-critical" data-sev="critical" type="button">Critical</button>
+            <button class="sev-pick-btn sev-pick-high"     data-sev="high"     type="button">High</button>
+            <button class="sev-pick-btn sev-pick-medium active" data-sev="medium" type="button">Medium</button>
+            <button class="sev-pick-btn sev-pick-low"      data-sev="low"      type="button">Low</button>
+            <button class="sev-pick-btn sev-pick-info"     data-sev="info"     type="button">Info</button>
+          </div>
+          <input type="hidden" id="custom-check-severity" value="medium">
+        </div>
+
+        <!-- Tags -->
+        <div class="form-group form-full">
+          <label>Tags <span class="field-optional">optional — press Enter or comma to add</span></label>
+          <div class="tag-chip-input" id="tag-chip-input">
+            <div class="tag-chips" id="tag-chips-list"></div>
+            <input class="tag-chip-text" id="custom-check-tags-input" placeholder="Add a tag…" maxlength="60" autocomplete="off">
+          </div>
+          <input type="hidden" id="custom-check-tags" value="">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost-modal" data-modal="modal-custom-check">Cancel</button>
+      <button class="btn btn-primary-modal" id="btn-save-custom-check">Save Check</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast notifications -->
 <div class="toast-container" id="toast-container"></div>
 

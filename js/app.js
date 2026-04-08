@@ -98,6 +98,7 @@ class SecWorkflowApp {
         version: '1.0',
       },
       itemStates: {},
+      customGroups: [],             // user-defined groups/items for the Custom Checks module
       collapseStates: {},           // persists group collapse/expand per module
       sortOrder: 'default',         // 'default' | 'severity' | 'status' | 'findings'
       filters: { status: 'all', severity: 'all', tag: 'all', search: '', findingsOnly: false },
@@ -113,12 +114,267 @@ class SecWorkflowApp {
     this._panelCves  = [];               // working copy of CVEs for the open panel
     this.reportGen = new ReportGenerator(this);
     this._loadFromStorage();
+    this._syncCustomModule();
     this._init();
   }
 
   // Returns the appropriate status list for the current assessment type
   _getStatusesForType() {
     return this.state.currentType === 'consultant' ? CONSULTANT_STATUSES : STATUSES;
+  }
+
+  // ── Custom Checks sync ────────────────────────────────────────────────────
+
+  /** Rebuild MODULE_CUSTOM.groups from state so all existing code sees the items. */
+  _syncCustomModule() {
+    MODULE_CUSTOM.groups.length = 0;
+    for (const g of this.state.customGroups) {
+      MODULE_CUSTOM.groups.push({
+        id: g.id,
+        name: g.name,
+        items: g.items.map(i => ({ ...i, _custom: true })),
+      });
+    }
+  }
+
+  // Tag chip state for the modal
+  _modalTags = [];
+
+  _openCustomCheckModal(groupId = null, editItem = null) {
+    // Ensure at least one group exists
+    if (this.state.customGroups.length === 0) {
+      this.state.customGroups.push({ id: 'custom-group-default', name: 'Custom Checks', items: [] });
+    }
+
+    // Populate group dropdown
+    const groupSel = document.getElementById('custom-check-group');
+    groupSel.innerHTML = '';
+    for (const g of this.state.customGroups) {
+      const opt = document.createElement('option');
+      opt.value = g.id;
+      opt.textContent = g.name;
+      if (g.id === groupId) opt.selected = true;
+      groupSel.appendChild(opt);
+    }
+
+    // Reset new-group inline form
+    document.getElementById('custom-new-group-row').style.display = 'none';
+    document.getElementById('custom-new-group-name').value = '';
+
+    const isEdit = !!editItem;
+    document.getElementById('custom-check-edit-id').value = editItem?.id || '';
+    document.getElementById('modal-custom-check-title').textContent = isEdit ? 'Edit Custom Check' : 'Add Custom Check';
+    document.getElementById('modal-custom-check-subtitle').textContent = isEdit
+      ? 'Update the definition for this check.'
+      : 'Add a check item to your pentest checklist.';
+    document.getElementById('modal-custom-check-icon').textContent = isEdit ? '✏️' : '＋';
+    document.getElementById('btn-save-custom-check').textContent = isEdit ? 'Save Changes' : 'Add Check';
+
+    // Fields
+    document.getElementById('custom-check-title-input').value = editItem?.title || '';
+    document.getElementById('custom-check-description').value = editItem?.description || '';
+
+    // Severity picker
+    const sev = editItem?.severity || 'medium';
+    document.getElementById('custom-check-severity').value = sev;
+    document.querySelectorAll('.sev-pick-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.sev === sev);
+    });
+
+    // Tag chips
+    this._modalTags = editItem?.tags ? [...editItem.tags] : [];
+    this._renderModalTags();
+
+    // Select the right group when editing
+    if (isEdit) {
+      for (const g of this.state.customGroups) {
+        if (g.items.some(i => i.id === editItem.id)) { groupSel.value = g.id; break; }
+      }
+    }
+
+    // Show/hide group field (hide for edits if only 1 group)
+    document.getElementById('custom-group-field').style.display =
+      (isEdit && this.state.customGroups.length <= 1) ? 'none' : '';
+
+    document.getElementById('modal-custom-check').style.display = 'flex';
+    setTimeout(() => document.getElementById('custom-check-title-input').focus(), 60);
+  }
+
+  _renderModalTags() {
+    const list = document.getElementById('tag-chips-list');
+    list.innerHTML = '';
+    for (const tag of this._modalTags) {
+      const chip = document.createElement('span');
+      chip.className = 'tag-chip';
+      chip.innerHTML = `${escHTML(tag)}<button class="tag-chip-remove" data-tag="${escHTML(tag)}" title="Remove">✕</button>`;
+      chip.querySelector('.tag-chip-remove').addEventListener('click', () => {
+        this._modalTags = this._modalTags.filter(t => t !== tag);
+        this._renderModalTags();
+      });
+      list.appendChild(chip);
+    }
+  }
+
+  _addModalTag(raw) {
+    const tag = raw.trim().toLowerCase().replace(/[^a-z0-9\-_.]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    if (!tag || this._modalTags.includes(tag) || this._modalTags.length >= 10) return;
+    this._modalTags.push(tag);
+    this._renderModalTags();
+  }
+
+  _saveCustomCheck() {
+    const title = document.getElementById('custom-check-title-input').value.trim();
+    if (!title) {
+      document.getElementById('custom-check-title-input').focus();
+      this._showToast('Title is required', 'error');
+      return;
+    }
+
+    const groupSel = document.getElementById('custom-check-group');
+    let groupId = groupSel.value;
+    const description = document.getElementById('custom-check-description').value.trim();
+    const severity = document.getElementById('custom-check-severity').value || 'medium';
+    const tags = [...this._modalTags];
+    const editId = document.getElementById('custom-check-edit-id').value;
+
+    if (editId) {
+      let found = false;
+      for (const g of this.state.customGroups) {
+        const idx = g.items.findIndex(i => i.id === editId);
+        if (idx !== -1) {
+          const item = g.items[idx];
+          item.title = title;
+          item.description = description;
+          item.severity = severity;
+          item.tags = tags;
+          if (g.id !== groupId) {
+            g.items.splice(idx, 1);
+            const target = this.state.customGroups.find(x => x.id === groupId);
+            if (target) target.items.push(item);
+          }
+          found = true;
+          break;
+        }
+      }
+      if (!found) { this._showToast('Check not found', 'error'); return; }
+    } else {
+      const group = this.state.customGroups.find(g => g.id === groupId);
+      if (!group) { this._showToast('Group not found', 'error'); return; }
+      const id = 'custom-item-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+      group.items.push({ id, title, description, severity, tags, frameworks: [], remediation: '' });
+    }
+
+    this._syncCustomModule();
+    this._saveToStorage();
+    document.getElementById('modal-custom-check').style.display = 'none';
+
+    if (this.state.currentModuleId === 'custom-checks') {
+      this._renderModule(MODULE_CUSTOM);
+      this._updateProgress(MODULE_CUSTOM);
+    }
+    this._renderSidebar();
+    this._showToast(editId ? 'Check updated' : 'Check added', 'success');
+  }
+
+  _openAddGroupInline() {
+    // Append an inline "new group" form at the bottom of the groups container
+    const existing = document.getElementById('inline-new-group-form');
+    if (existing) { existing.querySelector('input').focus(); return; }
+
+    const form = document.createElement('div');
+    form.id = 'inline-new-group-form';
+    form.className = 'custom-new-group-inline';
+    form.style.cssText = 'margin-top:12px;';
+    form.innerHTML = `
+      <input id="inline-new-group-input" placeholder="Group name…" maxlength="100" autocomplete="off" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;font-size:13px;outline:none;">
+      <button class="btn-create-group-confirm" type="button">Create group</button>
+      <button class="btn-create-group-cancel" type="button">✕</button>
+    `;
+    const input = form.querySelector('#inline-new-group-input');
+    const confirm = form.querySelector('.btn-create-group-confirm');
+    const cancel = form.querySelector('.btn-create-group-cancel');
+
+    const doCreate = () => {
+      const name = input.value.trim();
+      if (!name) { input.focus(); return; }
+      const id = 'custom-group-' + Date.now();
+      this.state.customGroups.push({ id, name, items: [] });
+      this._syncCustomModule();
+      this._saveToStorage();
+      this._renderModule(MODULE_CUSTOM);
+      this._updateProgress(MODULE_CUSTOM);
+      this._renderSidebar();
+    };
+    confirm.addEventListener('click', doCreate);
+    cancel.addEventListener('click', () => form.remove());
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); doCreate(); }
+      if (e.key === 'Escape') form.remove();
+    });
+
+    document.getElementById('checklist-groups').appendChild(form);
+    setTimeout(() => input.focus(), 40);
+  }
+
+  _confirmInlineNewGroup() {
+    const name = document.getElementById('custom-new-group-name').value.trim();
+    if (!name) { document.getElementById('custom-new-group-name').focus(); return; }
+    const id = 'custom-group-' + Date.now();
+    this.state.customGroups.push({ id, name, items: [] });
+    this._syncCustomModule();
+    this._saveToStorage();
+    // Add to dropdown and select it
+    const groupSel = document.getElementById('custom-check-group');
+    const opt = document.createElement('option');
+    opt.value = id; opt.textContent = name;
+    groupSel.appendChild(opt);
+    groupSel.value = id;
+    this._cancelInlineNewGroup();
+    this._renderSidebar();
+  }
+
+  _cancelInlineNewGroup() {
+    document.getElementById('custom-new-group-row').style.display = 'none';
+    document.getElementById('custom-new-group-name').value = '';
+  }
+
+  _deleteCustomItem(itemId) {
+    for (const g of this.state.customGroups) {
+      const idx = g.items.findIndex(i => i.id === itemId);
+      if (idx !== -1) {
+        g.items.splice(idx, 1);
+        break;
+      }
+    }
+    // Remove item state too
+    delete this.state.itemStates[itemId];
+    this._syncCustomModule();
+    this._saveToStorage();
+    if (this.state.currentModuleId === 'custom-checks') {
+      this._renderModule(MODULE_CUSTOM);
+      this._updateProgress(MODULE_CUSTOM);
+    }
+    this._renderSidebar();
+    this._showToast('Custom check deleted', 'info');
+  }
+
+  _deleteCustomGroup(groupId) {
+    const idx = this.state.customGroups.findIndex(g => g.id === groupId);
+    if (idx !== -1) {
+      // Remove item states for all items in this group
+      for (const item of this.state.customGroups[idx].items) {
+        delete this.state.itemStates[item.id];
+      }
+      this.state.customGroups.splice(idx, 1);
+    }
+    this._syncCustomModule();
+    this._saveToStorage();
+    if (this.state.currentModuleId === 'custom-checks') {
+      this._renderModule(MODULE_CUSTOM);
+      this._updateProgress(MODULE_CUSTOM);
+    }
+    this._renderSidebar();
+    this._showToast('Group deleted', 'info');
   }
 
   // ── Initialisation ─────────────────────────────────────────────────────────
@@ -182,6 +438,58 @@ class SecWorkflowApp {
 
     // Prominent Delete Local Data button
     document.getElementById('btn-delete-data')?.addEventListener('click', () => this._requestClearLocalData());
+
+    // Custom check modal — save
+    document.getElementById('btn-save-custom-check').addEventListener('click', () => this._saveCustomCheck());
+
+    // Severity picker buttons
+    document.getElementById('custom-sev-picker').addEventListener('click', (e) => {
+      const btn = e.target.closest('.sev-pick-btn');
+      if (!btn) return;
+      document.querySelectorAll('.sev-pick-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('custom-check-severity').value = btn.dataset.sev;
+    });
+
+    // Tag chip input
+    const tagInput = document.getElementById('custom-check-tags-input');
+    const tagChipBox = document.getElementById('tag-chip-input');
+    tagChipBox.addEventListener('click', () => tagInput.focus());
+    tagInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ',') {
+        e.preventDefault();
+        this._addModalTag(tagInput.value);
+        tagInput.value = '';
+      } else if (e.key === 'Backspace' && !tagInput.value && this._modalTags.length > 0) {
+        this._modalTags.pop();
+        this._renderModalTags();
+      }
+    });
+    tagInput.addEventListener('blur', () => {
+      if (tagInput.value.trim()) { this._addModalTag(tagInput.value); tagInput.value = ''; }
+    });
+
+    // New group inline form — show/hide
+    document.getElementById('btn-custom-new-group').addEventListener('click', () => {
+      document.getElementById('custom-new-group-row').style.display = '';
+      document.getElementById('custom-new-group-name').focus();
+    });
+    // Confirm new group
+    document.getElementById('btn-confirm-new-group').addEventListener('click', () => this._confirmInlineNewGroup());
+    document.getElementById('custom-new-group-name').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); this._confirmInlineNewGroup(); }
+      if (e.key === 'Escape') this._cancelInlineNewGroup();
+    });
+    // Cancel new group
+    document.getElementById('btn-cancel-new-group').addEventListener('click', () => this._cancelInlineNewGroup());
+
+    // Modal Enter key to save
+    document.getElementById('modal-custom-check').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA' && e.target.id !== 'custom-new-group-name') {
+        e.preventDefault();
+        this._saveCustomCheck();
+      }
+    });
 
     // Welcome screen "Export Report" button
     document.getElementById('btn-report-welcome')?.addEventListener('click', () => this._exportReport());
@@ -363,6 +671,7 @@ class SecWorkflowApp {
         version: 1,
         metadata: this.state.metadata,
         itemStates: this.state.itemStates,
+        customGroups: this.state.customGroups,
         collapseStates: this.state.collapseStates,
         currentModuleId: this.state.currentModuleId,
         currentType: this.state.currentType,
@@ -388,6 +697,7 @@ class SecWorkflowApp {
       const saved = JSON.parse(raw);
       if (saved.metadata) this.state.metadata = { ...this.state.metadata, ...saved.metadata };
       if (saved.itemStates) this.state.itemStates = saved.itemStates;
+      if (Array.isArray(saved.customGroups)) this.state.customGroups = saved.customGroups;
       if (saved.collapseStates) this.state.collapseStates = saved.collapseStates;
       if (saved.currentModuleId) this.state.currentModuleId = saved.currentModuleId;
       if (saved.currentType) this.state.currentType = saved.currentType;
@@ -442,9 +752,11 @@ class SecWorkflowApp {
       scope: '', exclusions: '', version: '1.0',
     };
     this.state.itemStates = {};
+    this.state.customGroups = [];
     this.state.collapseStates = {};
     this.state.currentModuleId = null;
     this.state.currentType = 'pentest';
+    this._syncCustomModule();
     this.state.modeSelected = false;
     this._syncMetaToUI();
     this._renderSidebar();
@@ -703,6 +1015,38 @@ class SecWorkflowApp {
       groups.appendChild(this._renderGroup(group));
     }
 
+    // Custom Checks module: toolbar + empty state
+    if (module.id === 'custom-checks') {
+      // Toolbar at top
+      const toolbar = document.createElement('div');
+      toolbar.className = 'custom-checks-toolbar';
+      const totalChecks = module.groups.reduce((n, g) => n + g.items.length, 0);
+      toolbar.innerHTML = `
+        <span class="custom-checks-toolbar-label">${totalChecks > 0 ? `${totalChecks} custom check${totalChecks !== 1 ? 's' : ''} across ${module.groups.length} group${module.groups.length !== 1 ? 's' : ''}` : 'No checks yet — add your own below.'}</span>
+        <div class="custom-checks-toolbar-actions">
+          <button class="btn-toolbar-ghost" id="btn-add-custom-group">+ New Group</button>
+          <button class="btn-toolbar-primary" id="btn-add-custom-check">+ Add Check</button>
+        </div>
+      `;
+      toolbar.querySelector('#btn-add-custom-check').addEventListener('click', () => this._openCustomCheckModal());
+      toolbar.querySelector('#btn-add-custom-group').addEventListener('click', () => this._openAddGroupInline());
+      groups.insertBefore(toolbar, groups.firstChild);
+
+      // Empty state
+      if (module.groups.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'custom-checks-empty';
+        empty.innerHTML = `
+          <div class="custom-checks-empty-icon">✏️</div>
+          <div class="custom-checks-empty-title">No custom checks yet</div>
+          <div class="custom-checks-empty-sub">Build your own checklist — add items for targets, techniques, or anything not covered by the built-in modules.</div>
+          <button class="btn-toolbar-primary">+ Add your first check</button>
+        `;
+        empty.querySelector('button').addEventListener('click', () => this._openCustomCheckModal());
+        groups.appendChild(empty);
+      }
+    }
+
     this._applyFilters();
   }
 
@@ -754,14 +1098,17 @@ class SecWorkflowApp {
       });
     }
 
+    const isCustomGroup = group.id.startsWith('custom-group');
+
     const header = document.createElement('div');
     // Restore collapse state
     const isCollapsed = !!this.state.collapseStates[group.id];
     header.className = `group-header${isCollapsed ? ' collapsed' : ''}`;
     header.innerHTML = `
-      <span class="group-header-title">${group.name}</span>
+      <span class="group-header-title">${escHTML(group.name)}</span>
       ${groupStatBits ? `<span class="group-stat-row">${groupStatBits}</span>` : ''}
       <span class="group-header-count">${completedCount}/${group.items.length}</span>
+      ${isCustomGroup ? `<button class="custom-group-add-btn" title="Add check to this group" aria-label="Add check to ${escHTML(group.name)}">+ Add</button><button class="custom-group-del-btn" title="Delete this group" aria-label="Delete group">🗑</button>` : ''}
       <span class="group-chevron">▾</span>
     `;
 
@@ -777,13 +1124,25 @@ class SecWorkflowApp {
       itemsContainer.appendChild(this._renderItem(item));
     }
 
-    header.addEventListener('click', () => {
+    header.addEventListener('click', (e) => {
+      if (e.target.closest('.custom-group-add-btn') || e.target.closest('.custom-group-del-btn')) return;
       const nowCollapsed = header.classList.toggle('collapsed');
       itemsContainer.classList.toggle('collapsed', nowCollapsed);
       // Persist collapse state
       this.state.collapseStates[group.id] = nowCollapsed;
       this._saveToStorage();
     });
+
+    if (isCustomGroup) {
+      const addBtn = header.querySelector('.custom-group-add-btn');
+      const delBtn = header.querySelector('.custom-group-del-btn');
+      if (addBtn) addBtn.addEventListener('click', (e) => { e.stopPropagation(); this._openCustomCheckModal(group.id); });
+      if (delBtn) delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (group.items.length > 0 && !confirm(`Delete group "${group.name}" and all ${group.items.length} check(s) inside?`)) return;
+        this._deleteCustomGroup(group.id);
+      });
+    }
 
     container.appendChild(header);
     container.appendChild(progressBar);
@@ -818,6 +1177,14 @@ class SecWorkflowApp {
     const lastNote = Array.isArray(ist.notes) && ist.notes.length > 0 ? ist.notes[ist.notes.length - 1] : null;
     const notePreview = lastNote ? `<div class="item-note-preview">📝 ${escHTML(lastNote.text.slice(0, 100))}${lastNote.text.length > 100 ? '…' : ''}</div>` : '';
 
+    const customBadge = item._custom ? `<span class="badge-custom">Custom</span>` : '';
+    const customControls = item._custom
+      ? `<div class="custom-item-controls">
+           <button class="custom-item-edit-btn" title="Edit this check" data-item-id="${escHTML(item.id)}">Edit</button>
+           <button class="custom-item-del-btn" title="Delete this check" data-item-id="${escHTML(item.id)}">Delete</button>
+         </div>`
+      : '';
+
     el.innerHTML = `
       <div class="item-status-col">
         <div class="status-dot status-${status}"></div>
@@ -825,7 +1192,7 @@ class SecWorkflowApp {
       <div class="item-body">
         <div class="item-title-row">
           <span class="item-title">${escHTML(item.title)}</span>
-          ${sevBadge}${findingBadge}${scopeBadge}
+          ${customBadge}${sevBadge}${findingBadge}${scopeBadge}
         </div>
         <div class="item-tags">${tagBadges}</div>
         <div class="item-desc">${escHTML(item.description.slice(0, 120))}${item.description.length > 120 ? '…' : ''}</div>
@@ -833,6 +1200,7 @@ class SecWorkflowApp {
       </div>
       <div class="item-actions">
         ${statusChips}
+        ${customControls}
       </div>
     `;
 
@@ -841,6 +1209,19 @@ class SecWorkflowApp {
       if (e.target.closest('.item-actions')) return;
       this._openPanel(item);
     });
+
+    // Custom item edit/delete buttons
+    if (item._custom) {
+      el.querySelector('.custom-item-edit-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._openCustomCheckModal(null, item);
+      });
+      el.querySelector('.custom-item-del-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!confirm(`Delete "${item.title}"?`)) return;
+        this._deleteCustomItem(item.id);
+      });
+    }
 
     return el;
   }
@@ -1409,6 +1790,8 @@ class SecWorkflowApp {
   // ── Report export ─────────────────────────────────────────────────────────
 
   _exportReport() {
+    // Always sync custom module before generating so MODULE_CUSTOM.groups is current
+    this._syncCustomModule();
     const type = this.state.currentType === 'consultant' ? 'consultant' : 'pentest';
     const mods = this.state.modeSelected
       ? (MODULES_BY_TYPE[this.state.currentType] || ALL_MODULES)
@@ -1427,6 +1810,7 @@ class SecWorkflowApp {
       appVersion: '1.0',
       metadata: this.state.metadata,
       itemStates: this.state.itemStates,
+      customGroups: this.state.customGroups,
     };
     const safeName = (this.state.metadata.projectName || 'secworkflow')
       .replace(/[^a-zA-Z0-9_\-. ]/g, '_').replace(/\s+/g, '_').slice(0, 80).toLowerCase();
@@ -1471,6 +1855,11 @@ class SecWorkflowApp {
               this.state.itemStates[key] = sanitiseItemState(val);
             }
           }
+        }
+
+        if (Array.isArray(data.customGroups)) {
+          this.state.customGroups = data.customGroups;
+          this._syncCustomModule();
         }
 
         this._syncMetaToUI();

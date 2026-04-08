@@ -25,10 +25,12 @@ class ReportGenerator {
       // Include any item that is not pristine-and-empty:
       //   - has a non-default status, OR
       //   - has notes, evidence, or is marked as a finding
+      //   - is a user-created custom item (always include regardless of status)
       // Always exclude out-of-scope items.
       const filtered = items.filter(item => {
         const ist = state.itemStates[item.id] || {};
         if (ist.outOfScope) return false;
+        if (item._custom) return true; // user-created checks always appear in the report
         const status = ist.status || 'not-started';
         const pristine = status === 'not-started' || status === 'not-assessed';
         const hasNotes = Array.isArray(ist.notes) && ist.notes.length > 0;
@@ -225,7 +227,11 @@ setTimeout(function() { window.print(); }, 450);
   _buildPentestBody(meta, moduleReports) {
     const now = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
     const findings = this._collectFindings(moduleReports);
-    const sevCounts = this._countBySeverity(findings);
+    // Risk summary counts: vulnerable built-in items + ALL custom items (user defined their severity explicitly)
+    const customItems = moduleReports.flatMap(({ module, items }) =>
+      items.filter(i => i._custom && !findings.some(f => f.item.id === i.id)).map(i => ({ item: i, module }))
+    );
+    const sevCounts = this._countBySeverity([...findings, ...customItems]);
     const version = meta.version || '1.0';
 
     let h = '';
@@ -255,9 +261,11 @@ setTimeout(function() { window.print(); }, 450);
 </div>`;
 
     // Executive Summary
+    const totalRisks = findings.length + customItems.length;
+    const customCount = customItems.length;
     h += `<div class="section page-break">
 <h1 class="sec-title">Executive Summary</h1>
-<p>This report presents the results of a penetration test conducted against <strong>${this._esc(meta.client || 'the client')}</strong>. The assessment covered <strong>${moduleReports.length} module(s)</strong> with a total of <strong>${findings.length} vulnerability/vulnerabilities identified</strong>.</p>
+<p>This report presents the results of a penetration test conducted against <strong>${this._esc(meta.client || 'the client')}</strong>. The assessment covered <strong>${moduleReports.length} module(s)</strong> with <strong>${findings.length} confirmed vulnerability/vulnerabilities</strong>${customCount > 0 ? ` and <strong>${customCount} custom check${customCount !== 1 ? 's' : ''}</strong> defined for this engagement` : ''}.</p>
 <h2 class="sub-title">Risk Summary</h2>
 <div class="risk-row">`;
     for (const [sev, cls] of [['critical','rc-critical'],['high','rc-high'],['medium','rc-medium'],['low','rc-low'],['info','rc-info']]) {
@@ -311,6 +319,50 @@ setTimeout(function() { window.print(); }, 450);
 
     if (!anyFindings) h += `<div class="no-findings">No vulnerabilities were identified in the selected scope.</div>`;
     h += `</div>`;
+
+    // Custom Checks — dedicated section showing every user-created check regardless of status
+    const customReport = moduleReports.find(r => r.module.id === 'custom-checks');
+    if (customReport && customReport.items.length > 0) {
+      h += `<div class="section page-break"><h1 class="sec-title">Custom Checks</h1>
+<p>The following checks were defined manually for this engagement.</p>`;
+
+      // Group items by their groupName
+      const byGroup = {};
+      for (const item of customReport.items) {
+        const grp = item.groupName || 'Custom Checks';
+        if (!byGroup[grp]) byGroup[grp] = [];
+        byGroup[grp].push(item);
+      }
+
+      for (const [groupName, groupItems] of Object.entries(byGroup)) {
+        h += `<h2 class="sub-title">${this._esc(groupName)}</h2>`;
+        for (const item of groupItems) {
+          const ist = this.app.state.itemStates[item.id] || {};
+          const sev = ist.severityOverride || item.severity || 'medium';
+          const status = ist.status || 'not-started';
+          const statusLabel = {
+            'not-started': 'Not Started', 'in-progress': 'In Progress',
+            'vulnerable': 'Vulnerable', 'not-vulnerable': 'Not Vulnerable',
+            'not-in-scope': 'Not in Scope', 'cannot-verify': 'Cannot Verify',
+          }[status] || status;
+
+          h += `<div class="finding-card">
+<div class="finding-header">
+  <span class="finding-name">${this._esc(item.title)}</span>
+  <span class="badge b-${sev}">${sev}</span>
+  <span class="badge b-${status}" style="margin-left:4pt">${this._esc(statusLabel)}</span>
+</div>
+<div class="finding-body">`;
+          if (item.description) h += `<div class="fld"><div class="fld-label">Description</div><div class="fld-value">${this._esc(item.description).replace(/\n/g,'<br>')}</div></div>`;
+          if (item.tags?.length) h += `<div class="fld"><div class="fld-label">Tags</div><div class="fld-value">${item.tags.map(t=>this._esc(t)).join(', ')}</div></div>`;
+          if ((ist.notes||[]).length > 0) h += `<div class="fld"><div class="fld-label">Notes</div><div class="fld-value">${ist.notes.map(e=>`<div class="note-report-entry"><span class="note-report-ts">${this._esc(this._formatNoteTs(e.ts))}</span>${this._esc(e.text).replace(/\n/g,'<br>')}</div>`).join('')}</div></div>`;
+          if (ist.evidence) h += `<div class="fld"><div class="fld-label">Evidence</div><div class="fld-value mono">${this._esc(ist.evidence)}</div></div>`;
+          if ((ist.cves||[]).length > 0) h += `<div class="fld"><div class="fld-label">CVEs</div><div class="fld-value">${ist.cves.map(c=>`<span class="badge b-cve">${this._esc(c)}</span>`).join(' ')}</div></div>`;
+          h += `</div></div>`;
+        }
+      }
+      h += `</div>`;
+    }
 
     // Observations
     const obsModules = moduleReports.filter(({ items }) =>
