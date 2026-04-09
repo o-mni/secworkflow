@@ -32,10 +32,13 @@ class ReportGenerator {
         if (ist.outOfScope) return false;
         if (item._custom) return true; // user-created checks always appear in the report
         const status = ist.status || 'not-started';
-        const pristine = status === 'not-started' || status === 'not-assessed';
-        const hasNotes = Array.isArray(ist.notes) && ist.notes.length > 0;
-        const hasData = hasNotes || !!ist.evidence || !!ist.isFinding;
-        return !pristine || hasData;
+        // Exclude items the user never touched
+        if (status === 'not-started' || status === 'not-assessed' || status === 'not-in-scope') {
+          const hasNotes = Array.isArray(ist.notes) && ist.notes.length > 0;
+          const hasData = hasNotes || !!ist.evidence || !!ist.isFinding;
+          return hasData; // only include if user added something despite default status
+        }
+        return true;
       });
 
       if (filtered.length === 0) continue;
@@ -185,6 +188,7 @@ tr:last-child td { border-bottom: none; }
 .b-in-progress   { background: #dbeafe; color: #1d4ed8; }
 .b-cannot-verify { background: #fef9c3; color: #92400e; }
 .b-not-vulnerable{ background: #dcfce7; color: #166534; }
+.b-not-compliant { background: #fee2e2; color: #dc2626; }
 .b-not-started   { background: #f3f4f6; color: #4b5563; }
 .b-not-in-scope  { background: #f3f4f6; color: #9ca3af; }
 .b-cve           { background: #ede9fe; color: #6d28d9; font-family: 'Cascadia Code', Consolas, monospace; letter-spacing: .2px; }
@@ -364,22 +368,49 @@ setTimeout(function() { window.print(); }, 450);
       h += `</div>`;
     }
 
-    // Observations
+    // Observations — all touched items that are not vulnerable and not custom
+    const obsStatuses = new Set(['not-vulnerable', 'in-progress', 'cannot-verify', 'not-started']);
+    const statusLabel = {
+      'not-vulnerable': 'Not Vulnerable', 'in-progress': 'In Progress',
+      'cannot-verify': 'Cannot Verify', 'not-started': 'Not Started',
+    };
     const obsModules = moduleReports.filter(({ items }) =>
-      items.some(i => { const s=(this.app.state.itemStates[i.id]||{}).status; return s==='in-progress'||s==='cannot-verify'; })
+      items.some(i => {
+        if (i._custom) return false;
+        const s = (this.app.state.itemStates[i.id]||{}).status || 'not-started';
+        return obsStatuses.has(s);
+      })
     );
     if (obsModules.length) {
       h += `<div class="section page-break"><h1 class="sec-title">Observations</h1>`;
       for (const { module, items } of obsModules) {
-        const obs = items.filter(i => { const s=(this.app.state.itemStates[i.id]||{}).status; return s==='in-progress'||s==='cannot-verify'; });
+        const obs = items.filter(i => {
+          if (i._custom) return false;
+          const s = (this.app.state.itemStates[i.id]||{}).status || 'not-started';
+          return obsStatuses.has(s);
+        });
+        if (!obs.length) continue;
         h += `<div class="mod-header"><span class="mod-icon">${module.icon}</span><span class="mod-name">${this._esc(module.name)}</span></div>`;
-        h += `<div class="obs-list">`;
         for (const item of obs) {
           const ist = this.app.state.itemStates[item.id]||{};
-          const lbl = ist.status==='cannot-verify' ? 'Cannot Verify' : 'In Progress';
-          h += `<div class="obs-item"><div class="obs-main"><div class="obs-title">${this._esc(item.title)}</div>${(ist.notes||[]).length>0?`<div class="obs-note">${this._esc(ist.notes[ist.notes.length-1].text)}</div>`:''}</div><span class="badge b-${ist.status}">${lbl}</span></div>`;
+          const s = ist.status || 'not-started';
+          const lbl = statusLabel[s] || s;
+          const sev = ist.severityOverride || item.severity || 'info';
+          h += `<div class="finding-card">
+<div class="finding-header">
+  <span class="finding-name">${this._esc(item.title)}</span>
+  <span class="badge b-${s}">${lbl}</span>
+  ${item.severity ? `<span class="badge b-${sev}" style="margin-left:4pt">${sev}</span>` : ''}
+</div>
+<div class="finding-body">
+  ${item.description ? `<div class="fld"><div class="fld-label">Description</div><div class="fld-value">${this._esc(item.description)}</div></div>` : ''}
+  ${item.tags?.length ? `<div class="fld"><div class="fld-label">Tags</div><div class="fld-value">${item.tags.map(t=>this._esc(t)).join(', ')}</div></div>` : ''}
+  ${(ist.notes||[]).length > 0 ? `<div class="fld"><div class="fld-label">Notes</div><div class="fld-value">${(ist.notes||[]).map(e=>`<div class="note-report-entry"><span class="note-report-ts">${this._esc(this._formatNoteTs(e.ts))}</span>${this._esc(e.text).replace(/\n/g,'<br>')}</div>`).join('')}</div></div>` : ''}
+  ${ist.evidence ? `<div class="fld"><div class="fld-label">Evidence</div><div class="fld-value mono">${this._esc(ist.evidence)}</div></div>` : ''}
+  ${(ist.cves||[]).length > 0 ? `<div class="fld"><div class="fld-label">CVEs</div><div class="fld-value">${(ist.cves||[]).map(c=>`<span class="badge b-cve">${this._esc(c)}</span>`).join(' ')}</div></div>` : ''}
+</div>
+</div>`;
         }
-        h += `</div>`;
       }
       h += `</div>`;
     }
