@@ -90,6 +90,18 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
 }
 .btn-report-top:hover { background: var(--accent-hover); }
 
+/* Split report button */
+.report-split-wrap { position: relative; display: inline-flex; }
+.report-split-wrap .btn-report-main { border-radius: var(--radius-sm) 0 0 var(--radius-sm); padding-right: 10px; }
+.report-split-wrap .btn-report-chevron {
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0; padding: 6px 8px;
+  border-left: 1px solid rgba(255,255,255,.2);
+}
+.report-split-wrap.open .report-split-dropdown { display: block; }
+.report-split-dropdown { right: 0; }
+.dropdown-item-muted { opacity: .7; }
+.dropdown-item-muted:hover { opacity: 1; }
+
 /* Dropdown */
 .topbar-dropdown-wrap { position: relative; }
 .topbar-dropdown {
@@ -810,6 +822,8 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
   cursor: pointer; transition: all .12s;
 }
 .btn-welcome-report:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+.btn-welcome-report-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-welcome-report-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
 
 /* ── Sidebar mode bar (replaces tabs) ──────────────────────────── */
 .sidebar-mode-bar {

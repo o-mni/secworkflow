@@ -92,10 +92,26 @@
 
     <div class="topbar-divider"></div>
 
-    <button class="btn btn-report-top" id="btn-report" title="Generate PDF Report">
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/></svg>
-      Export Report
-    </button>
+    <div class="report-split-wrap" id="report-split-wrap">
+      <button class="btn btn-report-top btn-report-main" id="btn-report" title="Export HTML Report">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/></svg>
+        Export HTML
+      </button>
+      <button class="btn btn-report-top btn-report-chevron" id="btn-report-menu-toggle" title="More export options" aria-label="More export options">
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z"/></svg>
+      </button>
+      <div class="topbar-dropdown report-split-dropdown" id="report-menu">
+        <button class="dropdown-item" id="btn-export-html-drop">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/></svg>
+          Export HTML Report
+        </button>
+        <div class="dropdown-divider"></div>
+        <button class="dropdown-item dropdown-item-muted" id="btn-export-pdf-drop">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M5.523 10.424c.14-.082.293-.162.459-.238a7.878 7.878 0 0 1-.45.606c-.28.337-.498.516-.635.572a.266.266 0 0 1-.035.012.282.282 0 0 1-.026-.044c-.056-.11-.054-.216.04-.36.106-.165.319-.354.647-.548zm2.455-1.647c-.119.025-.237.05-.356.078a21.035 21.035 0 0 0 .5-1.05 12.045 12.045 0 0 0 .51.858c-.217.032-.436.07-.654.114zm2.525.939a3.881 3.881 0 0 1-.435-.41c.228.005.434.022.612.054.317.057.466.147.518.209a.095.095 0 0 1 .026.064.436.436 0 0 1-.06.2.307.307 0 0 1-.094.124.107.107 0 0 1-.069.015c-.09-.003-.258-.066-.498-.256zM8 1a.5.5 0 0 1 .5.5v.5h1a.5.5 0 0 1 0 1H8.5v5.793l2.146-2.147a.5.5 0 0 1 .708.708l-3 3a.5.5 0 0 1-.708 0l-3-3a.5.5 0 0 1 .708-.708L7.5 7.793V3h-1a.5.5 0 0 1 0-1h1V1.5A.5.5 0 0 1 8 1zM4.5 11h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1z"/></svg>
+          Export PDF (legacy)
+        </button>
+      </div>
+    </div>
 
     <!-- Support button -->
     <a class="btn btn-support" href="mailto:support@secworkflow.rodrigosa.lu" title="Contact support: support@secworkflow.rodrigosa.lu">?</a>
@@ -245,9 +261,13 @@
       </div>
 
       <div class="welcome-footer-bar">
-        <button class="btn-welcome-report" id="btn-report-welcome" title="Generate a PDF report from current data">
+        <button class="btn-welcome-report btn-welcome-report-primary" id="btn-report-welcome" title="Download interactive HTML report">
           <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/></svg>
-          Export Report
+          Export HTML
+        </button>
+        <button class="btn-welcome-report" id="btn-report-pdf-welcome" title="Open PDF export (legacy)">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M5.523 10.424c.14-.082.293-.162.459-.238a7.878 7.878 0 0 1-.45.606c-.28.337-.498.516-.635.572a.266.266 0 0 1-.035.012.282.282 0 0 1-.026-.044c-.056-.11-.054-.216.04-.36.106-.165.319-.354.647-.548zm2.455-1.647c-.119.025-.237.05-.356.078a21.035 21.035 0 0 0 .5-1.05 12.045 12.045 0 0 0 .51.858c-.217.032-.436.07-.654.114zm2.525.939a3.881 3.881 0 0 1-.435-.41c.228.005.434.022.612.054.317.057.466.147.518.209a.095.095 0 0 1 .026.064.436.436 0 0 1-.06.2.307.307 0 0 1-.094.124.107.107 0 0 1-.069.015c-.09-.003-.258-.066-.498-.256zM8 1a.5.5 0 0 1 .5.5v.5h1a.5.5 0 0 1 0 1H8.5v5.793l2.146-2.147a.5.5 0 0 1 .708.708l-3 3a.5.5 0 0 1-.708 0l-3-3a.5.5 0 0 1 .708-.708L7.5 7.793V3h-1a.5.5 0 0 1 0-1h1V1.5A.5.5 0 0 1 8 1zM4.5 11h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1z"/></svg>
+          Export PDF
         </button>
       </div>
     </div>

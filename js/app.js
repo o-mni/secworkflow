@@ -432,7 +432,19 @@ class SecWorkflowApp {
     document.getElementById('import-file-input').addEventListener('change', e => this._stageImport(e));
     document.getElementById('btn-export-json').addEventListener('click', () => this._exportJSON());
     document.getElementById('btn-export-md').addEventListener('click', () => this._exportMarkdown());
-    document.getElementById('btn-report').addEventListener('click', () => this._exportReport());
+    document.getElementById('btn-report').addEventListener('click', () => this._exportHTML());
+    document.getElementById('btn-report-menu-toggle').addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.getElementById('report-split-wrap').classList.toggle('open');
+    });
+    document.getElementById('btn-export-html-drop').addEventListener('click', () => {
+      document.getElementById('report-split-wrap').classList.remove('open');
+      this._exportHTML();
+    });
+    document.getElementById('btn-export-pdf-drop').addEventListener('click', () => {
+      document.getElementById('report-split-wrap').classList.remove('open');
+      this._exportReport();
+    });
     document.getElementById('btn-project-meta').addEventListener('click', () => this._openMetaModal());
 
     // Prominent Delete Local Data button
@@ -490,8 +502,9 @@ class SecWorkflowApp {
       }
     });
 
-    // Welcome screen "Export Report" button
-    document.getElementById('btn-report-welcome')?.addEventListener('click', () => this._exportReport());
+    // Welcome screen export buttons
+    document.getElementById('btn-report-welcome')?.addEventListener('click', () => this._exportHTML());
+    document.getElementById('btn-report-pdf-welcome')?.addEventListener('click', () => this._exportReport());
 
     // Data dropdown toggle
     const dataMenuWrap = document.getElementById('data-menu-wrap');
@@ -499,7 +512,10 @@ class SecWorkflowApp {
       e.stopPropagation();
       dataMenuWrap.classList.toggle('open');
     });
-    document.addEventListener('click', () => dataMenuWrap.classList.remove('open'));
+    document.addEventListener('click', () => {
+      dataMenuWrap.classList.remove('open');
+      document.getElementById('report-split-wrap')?.classList.remove('open');
+    });
 
     // Classification picker
     document.getElementById('classification-picker').addEventListener('click', (e) => {
@@ -1763,15 +1779,22 @@ class SecWorkflowApp {
 
   // ── Report export ─────────────────────────────────────────────────────────
 
-  _exportReport() {
-    // Always sync custom module before generating so MODULE_CUSTOM.groups is current
+  _getReportOptions() {
     this._syncCustomModule();
     const type = this.state.currentType === 'consultant' ? 'consultant' : 'pentest';
     const mods = this.state.modeSelected
       ? (MODULES_BY_TYPE[this.state.currentType] || ALL_MODULES)
       : ALL_MODULES;
-    const includedModuleIds = mods.map(m => m.id);
-    this.reportGen.generatePDF({ type, includedModuleIds });
+    return { type, includedModuleIds: mods.map(m => m.id) };
+  }
+
+  _exportHTML() {
+    this.reportGen.generateHTML(this._getReportOptions());
+    this._showToast('HTML report downloaded', 'success');
+  }
+
+  _exportReport() {
+    this.reportGen.generatePDF(this._getReportOptions());
     this._showToast('Opening PDF report…', 'success');
   }
 
