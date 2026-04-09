@@ -109,7 +109,6 @@ class SecWorkflowApp {
     this._sessionDirty = false;          // true when unsaved work exists in Session Mode
     this._pendingImportFile = null;      // staged file waiting for import confirmation
     this._moduleCompleteToasted = false; // prevents repeat completion toasts per module
-    this._panelDirty = false;            // true when panel has unsaved edits
     this._panelNotes = [];               // working copy of notes for the open panel
     this._panelCves  = [];               // working copy of CVEs for the open panel
     this.reportGen = new ReportGenerator(this);
@@ -548,17 +547,16 @@ class SecWorkflowApp {
     });
 
     // Panel
-    document.getElementById('panel-close').addEventListener('click', () => this._closePanel(true));
+    document.getElementById('panel-close').addEventListener('click', () => this._closePanel());
     document.getElementById('panel-close-btn').addEventListener('click', () => this._closePanel());
-    document.getElementById('panel-save-btn').addEventListener('click', () => this._savePanelItem());
-    document.getElementById('panel-overlay').addEventListener('click', () => this._closePanel(true));
+    document.getElementById('panel-overlay').addEventListener('click', () => this._closePanel());
 
-    // Mark panel dirty on any change (used to warn on close without saving)
-    ['panel-status', 'panel-severity', 'panel-notes-input', 'panel-evidence', 'panel-is-finding', 'panel-out-of-scope'].forEach(id => {
+    // Autosave on any panel field change
+    ['panel-status', 'panel-severity', 'panel-evidence', 'panel-is-finding', 'panel-out-of-scope'].forEach(id => {
       const el = document.getElementById(id);
       if (el) {
-        el.addEventListener('input',  () => { this._panelDirty = true; });
-        el.addEventListener('change', () => { this._panelDirty = true; });
+        el.addEventListener('input',  () => this._applyPanelChanges());
+        el.addEventListener('change', () => this._applyPanelChanges());
       }
     });
 
@@ -764,7 +762,7 @@ class SecWorkflowApp {
     this._syncStorageModeUI();
     this._updateDocTitle();
     this._showWelcomeScreen();
-    this._closePanel(true);
+    this._closePanel();
     this._showToast('All local data cleared — app reset to defaults', 'success');
   }
 
@@ -1297,8 +1295,8 @@ class SecWorkflowApp {
     this._panelNotes.push({ text, ts: new Date().toISOString() });
     ta.value = '';
     ta.style.height = '';
-    this._panelDirty = true;
     this._renderNotesThread();
+    this._applyPanelChanges();
   }
 
   _renderNotesThread() {
@@ -1321,8 +1319,8 @@ class SecWorkflowApp {
         e.stopPropagation();
         const i = parseInt(btn.dataset.idx, 10);
         this._panelNotes.splice(i, 1);
-        this._panelDirty = true;
         this._renderNotesThread();
+        this._applyPanelChanges();
       });
     });
     // Scroll to bottom to show latest entry
@@ -1338,8 +1336,8 @@ class SecWorkflowApp {
     const cve = val.startsWith('CVE-') ? val : `CVE-${val}`;
     if (this._panelCves.includes(cve)) return; // no duplicates
     this._panelCves.push(cve);
-    this._panelDirty = true;
     this._renderCveChips();
+    this._applyPanelChanges();
   }
 
   _renderCveChips() {
@@ -1351,8 +1349,8 @@ class SecWorkflowApp {
     wrap.querySelectorAll('.cve-chip-remove').forEach(btn => {
       btn.addEventListener('click', () => {
         this._panelCves.splice(parseInt(btn.dataset.idx, 10), 1);
-        this._panelDirty = true;
         this._renderCveChips();
+        this._applyPanelChanges();
       });
     });
   }
@@ -1425,37 +1423,18 @@ class SecWorkflowApp {
     fwEl.innerHTML = (item.frameworks || []).map(f => `<span class="badge badge-framework">${f}</span>`).join('') || '<span class="text-muted text-small">None</span>';
 
     // Show panel
-    this._panelDirty = false;
     document.getElementById('panel-overlay').style.display = 'block';
     document.getElementById('item-panel').style.display = 'flex';
   }
 
-  _closePanel(force = false) {
-    if (!force && this._panelDirty) {
-      // Two-step confirm: first click turns button red, second click closes
-      const btn = document.getElementById('panel-close-btn');
-      if (!btn.dataset.confirmPending) {
-        btn.dataset.confirmPending = '1';
-        btn.textContent = 'Discard changes?';
-        btn.classList.add('panel-close-btn-warn');
-        setTimeout(() => {
-          delete btn.dataset.confirmPending;
-          btn.textContent = 'Close';
-          btn.classList.remove('panel-close-btn-warn');
-        }, 3000);
-        return;
-      }
-      delete btn.dataset.confirmPending;
-      btn.textContent = 'Close';
-      btn.classList.remove('panel-close-btn-warn');
-    }
-    this._panelDirty = false;
+  _closePanel() {
+    this._applyPanelChanges();
     document.getElementById('panel-overlay').style.display = 'none';
     document.getElementById('item-panel').style.display = 'none';
     this.panelItemId = null;
   }
 
-  _savePanelItem() {
+  _applyPanelChanges() {
     if (!this.panelItemId) return;
     const id = this.panelItemId;
 
@@ -1506,11 +1485,8 @@ class SecWorkflowApp {
       } else if (notePreview) notePreview.remove();
     }
 
-    this._panelDirty = false;
     this._updateProgress(MODULE_MAP[this.state.currentModuleId]);
     this._renderSidebar();
-    this._closePanel(true);
-    this._showToast('Item saved', 'success');
   }
 
   // ── Progress ──────────────────────────────────────────────────────────────
