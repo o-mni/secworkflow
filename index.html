@@ -4,20 +4,24 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CyberWorkbench</title>
-  <meta name="description" content="Offline cybersecurity operations workbench for SOC analysts." />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
 
-<!-- ═══════════════════════════ SIDEBAR ═══════════════════════════ -->
+<!-- ═══════ SIDEBAR ═══════ -->
 <aside class="sidebar" id="sidebar">
   <div class="sb-brand">
     <div class="sb-logo">
-      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 2L3 5v5c0 4 3 7 7 8 4-1 7-4 7-8V5l-7-3z"/><circle cx="10" cy="10" r="2" fill="currentColor" stroke="none"/></svg>
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M10 2L3 5v5c0 4 3 7 7 8 4-1 7-4 7-8V5l-7-3z"/>
+        <circle cx="10" cy="10" r="2" fill="currentColor" stroke="none"/>
+      </svg>
       <span class="sb-label sb-title">CyberWorkbench</span>
     </div>
     <button class="sb-toggle" id="sb-toggle" title="Toggle sidebar">
-      <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path d="M3 5h14M3 10h14M3 15h14"/></svg>
+      <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M3 5h14M3 10h14M3 15h14"/>
+      </svg>
     </button>
   </div>
 
@@ -26,14 +30,14 @@
       <svg class="sb-icon" viewBox="0 0 20 20" fill="currentColor"><rect x="1" y="1" width="8" height="8" rx="1.5"/><rect x="11" y="1" width="8" height="8" rx="1.5"/><rect x="1" y="11" width="8" height="8" rx="1.5"/><rect x="11" y="11" width="8" height="8" rx="1.5"/></svg>
       <span class="sb-label">Dashboard</span>
     </button>
-    <button class="sb-btn" data-page="triage" title="SOC Triage">
+    <button class="sb-btn" data-page="soc" title="SOC Helper">
       <svg class="sb-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/></svg>
-      <span class="sb-label">SOC Triage</span>
+      <span class="sb-label">SOC Helper</span>
       <span class="sb-badge" id="triage-badge"></span>
     </button>
-    <button class="sb-btn" data-page="ir" title="Incident Response">
+    <button class="sb-btn" data-page="ir" title="IR Playbooks">
       <svg class="sb-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9.661 2.237a.531.531 0 01.678 0 11.947 11.947 0 007.078 2.749.5.5 0 01.479.425c.069.52.104 1.05.104 1.59 0 5.162-3.26 9.563-7.834 11.256a.48.48 0 01-.332 0C5.26 16.564 2 12.163 2 7c0-.538.035-1.069.104-1.589a.5.5 0 01.48-.425 11.947 11.947 0 007.077-2.749zm4.196 5.954a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clip-rule="evenodd"/></svg>
-      <span class="sb-label">Incident Response</span>
+      <span class="sb-label">IR Playbooks</span>
     </button>
     <button class="sb-btn" data-page="pentest" title="Pentest Helper">
       <svg class="sb-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="16" height="13" rx="2"/><path d="M5 8l3 3-3 3m5 0h4" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -43,18 +47,14 @@
       <svg class="sb-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd"/></svg>
       <span class="sb-label">Investigation</span>
     </button>
-    <button class="sb-btn" data-page="notes" title="Analyst Notes">
-      <svg class="sb-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 3h9l3 3v11a1 1 0 01-1 1H4a1 1 0 01-1-1V4a1 1 0 011-1z" stroke-linecap="round"/><path d="M13 3v4h4M7 9h6M7 12h4" stroke-linecap="round"/></svg>
-      <span class="sb-label">Notes</span>
-    </button>
-    <button class="sb-btn" data-page="todo" title="To-Do List">
+    <button class="sb-btn" data-page="todo" title="To-Do">
       <svg class="sb-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6l2 2 3-3m3 1h4M4 11l2 2 3-3m3 1h4M4 16l2 2 3-3m3 1h4" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span class="sb-label">To-Do</span>
       <span class="sb-badge" id="todo-badge"></span>
     </button>
-    <button class="sb-btn" data-page="governance" title="Governance & Risk">
+    <button class="sb-btn" data-page="nis2" title="NIS2 Reference">
       <svg class="sb-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 2L3 5v5c0 4 3 7 7 8 4-1 7-4 7-8V5l-7-3z" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <span class="sb-label">Governance</span>
+      <span class="sb-label">NIS2</span>
     </button>
     <button class="sb-btn" data-page="settings" title="Settings">
       <svg class="sb-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.34 1.804A1 1 0 019.32 1h1.36a1 1 0 01.98.804l.295 1.473c.497.144.971.342 1.416.587l1.25-.834a1 1 0 011.262.125l.962.962a1 1 0 01.125 1.262l-.834 1.25c.245.445.443.919.587 1.416l1.473.294a1 1 0 01.804.98v1.361a1 1 0 01-.804.98l-1.473.295a6.95 6.95 0 01-.587 1.416l.834 1.25a1 1 0 01-.125 1.262l-.962.962a1 1 0 01-1.262.125l-1.25-.834a6.953 6.953 0 01-1.416.587l-.294 1.473a1 1 0 01-.98.804H9.32a1 1 0 01-.98-.804l-.295-1.473a6.957 6.957 0 01-1.416-.587l-1.25.834a1 1 0 01-1.262-.125l-.962-.962a1 1 0 01-.125-1.262l.834-1.25a6.957 6.957 0 01-.587-1.416l-1.473-.294A1 1 0 011 10.68V9.32a1 1 0 01.804-.98l1.473-.295c.144-.497.342-.971.587-1.416l-.834-1.25a1 1 0 01.125-1.262l.962-.962A1 1 0 015.38 3.03l1.25.834a6.957 6.957 0 011.416-.587L8.34 1.804zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/></svg>
@@ -64,376 +64,177 @@
 
   <div class="sb-foot">
     <div class="sb-clock" id="sb-clock">00:00:00 UTC</div>
-    <div class="sb-label sb-version">v2.0 · Offline</div>
+    <div class="sb-label sb-version">v2.1 · Offline</div>
   </div>
 </aside>
 
-<!-- ═══════════════════════════ WORKSPACE ═══════════════════════════ -->
+<!-- ═══════ WORKSPACE ═══════ -->
 <main class="workspace" id="workspace">
 
-  <!-- ─────────────────── PAGE: DASHBOARD ─────────────────── -->
+  <!-- ── DASHBOARD ── -->
   <section class="page active" id="page-dashboard">
     <div class="page-head">
-      <div class="page-head-left">
-        <h1>Dashboard</h1>
-        <div class="page-sub" id="dash-date">—</div>
+      <h1>Dashboard</h1>
+      <div class="page-sub" id="dash-date">—</div>
+    </div>
+
+    <div class="dash-stats">
+      <div class="dash-stat">
+        <div class="dash-stat-num" id="dash-pending">0</div>
+        <div class="dash-stat-label">Pending Tasks</div>
+      </div>
+      <div class="dash-stat">
+        <div class="dash-stat-num" id="dash-critical">0</div>
+        <div class="dash-stat-label">Critical Scenarios</div>
       </div>
     </div>
-    <div class="dash-grid">
 
-      <div class="card dash-focus">
-        <div class="card-hdr">Today's Focus</div>
-        <div class="card-body">
-          <textarea id="today-focus" class="auto-expand" placeholder="What is your primary objective for this shift? Set the direction here." rows="3" maxlength="600"></textarea>
-        </div>
+    <div class="dash-shortcuts">
+      <button class="shortcut-btn" data-goto="soc">
+        <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495z" clip-rule="evenodd"/></svg>
+        SOC Helper
+      </button>
+      <button class="shortcut-btn" data-goto="todo">
+        <svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6l2 2 3-3m3 1h4"/></svg>
+        To-Do
+      </button>
+      <button class="shortcut-btn" data-goto="investigation">
+        <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd"/></svg>
+        Investigation
+      </button>
+    </div>
+
+    <div class="card">
+      <div class="card-hdr">Latest Scenario</div>
+      <div class="card-body" id="dash-last-alert">
+        <div class="empty-msg">No scenario yet — use SOC Helper to generate one.</div>
       </div>
+    </div>
 
-      <div class="card dash-case">
-        <div class="card-hdr">Active Case</div>
-        <div class="card-body">
-          <div class="form-field">
-            <label for="case-title">Case Title</label>
-            <input type="text" id="case-title" placeholder="Incident name or case reference" />
-          </div>
-          <div class="form-row-3">
-            <div class="form-field">
-              <label for="case-severity">Severity</label>
-              <select id="case-severity">
-                <option value="">—</option>
-                <option value="CRITICAL">CRITICAL</option>
-                <option value="HIGH">HIGH</option>
-                <option value="MEDIUM">MEDIUM</option>
-                <option value="LOW">LOW</option>
-              </select>
-            </div>
-            <div class="form-field">
-              <label for="case-status">Status</label>
-              <select id="case-status">
-                <option value="">—</option>
-                <option value="Investigating">Investigating</option>
-                <option value="Contained">Contained</option>
-                <option value="Eradicated">Eradicated</option>
-                <option value="Escalated">Escalated</option>
-                <option value="Closed">Closed</option>
-              </select>
-            </div>
-            <div class="form-field">
-              <label for="case-date">Opened</label>
-              <input type="date" id="case-date" />
-            </div>
-          </div>
-          <div class="form-field">
-            <label for="case-owner">Owner / Team</label>
-            <input type="text" id="case-owner" placeholder="Analyst name or team" />
-          </div>
-        </div>
+    <div class="card">
+      <div class="card-hdr">
+        Alert Triage Checklist
+        <button class="btn-ghost btn-sm" id="btn-reset-checklist">Reset</button>
       </div>
-
-      <div class="card dash-tasks">
-        <div class="card-hdr card-hdr-action">
-          <span>Active Tasks</span>
-          <button class="link-btn" data-goto="todo">View All →</button>
-        </div>
-        <div class="card-body" id="dash-task-list">
-          <div class="empty-msg">No pending tasks.</div>
-        </div>
-      </div>
-
-      <div class="card dash-alert">
-        <div class="card-hdr card-hdr-action">
-          <span>Last Alert</span>
-          <button class="link-btn" data-goto="triage">SOC Triage →</button>
-        </div>
-        <div class="card-body" id="dash-last-alert">
-          <div class="empty-msg">No alerts generated yet.</div>
-        </div>
-      </div>
-
-      <div class="card dash-checklist">
-        <div class="card-hdr card-hdr-action">
-          <span>Quick Triage Checklist</span>
-          <button class="link-btn" id="btn-reset-checklist">Reset</button>
-        </div>
-        <div class="card-body">
-          <div class="checklist" id="triage-checklist"></div>
-        </div>
-      </div>
-
-      <div class="card dash-reminders">
-        <div class="card-hdr">Investigation Reminders</div>
-        <div class="card-body">
-          <ul class="reminder-list">
-            <li><span class="rem-q">What changed?</span><span class="rem-a">Review recent system changes, new processes, new accounts, modified configs.</span></li>
-            <li><span class="rem-q">Who was affected?</span><span class="rem-a">Identify users, systems, data types, and business impact scope.</span></li>
-            <li><span class="rem-q">What evidence supports this?</span><span class="rem-a">Do not proceed on assumptions — find corroborating log entries.</span></li>
-            <li><span class="rem-q">Could this be a false positive?</span><span class="rem-a">Check if normal business activity could explain the alert before escalating.</span></li>
-            <li><span class="rem-q">What if we do nothing?</span><span class="rem-a">Assess the risk of inaction to inform escalation decisions.</span></li>
-          </ul>
-        </div>
-      </div>
-
+      <div class="card-body" id="triage-checklist"></div>
     </div>
   </section>
 
-  <!-- ─────────────────── PAGE: SOC TRIAGE ─────────────────── -->
-  <section class="page" id="page-triage">
+  <!-- ── SOC HELPER ── -->
+  <section class="page" id="page-soc">
     <div class="page-head">
-      <div class="page-head-left">
-        <h1>SOC Triage</h1>
-        <div class="page-sub">Generate and triage simulated alerts. History persists across sessions.</div>
-      </div>
+      <h1>Alert Scenario Helper</h1>
       <div class="page-actions">
-        <button class="btn-primary" id="btn-new-alert">+ New Alert</button>
+        <button class="btn-primary" id="btn-new-alert">Generate Scenario</button>
         <button class="btn-ghost" id="btn-clear-alerts">Clear All</button>
       </div>
     </div>
+
     <div class="sev-filters" id="sev-filters">
-      <button class="sev-filter active" data-sev="ALL">All <span class="sf-count" id="cnt-all">0</span></button>
-      <button class="sev-filter" data-sev="CRITICAL">Critical <span class="sf-count" id="cnt-critical">0</span></button>
-      <button class="sev-filter" data-sev="HIGH">High <span class="sf-count" id="cnt-high">0</span></button>
-      <button class="sev-filter" data-sev="MEDIUM">Medium <span class="sf-count" id="cnt-medium">0</span></button>
-      <button class="sev-filter" data-sev="LOW">Low <span class="sf-count" id="cnt-low">0</span></button>
+      <button class="sev-filter active" data-sev="ALL">All <span class="sev-cnt" id="cnt-all">0</span></button>
+      <button class="sev-filter CRITICAL" data-sev="CRITICAL">CRITICAL <span class="sev-cnt" id="cnt-critical">0</span></button>
+      <button class="sev-filter HIGH" data-sev="HIGH">HIGH <span class="sev-cnt" id="cnt-high">0</span></button>
+      <button class="sev-filter MEDIUM" data-sev="MEDIUM">MEDIUM <span class="sev-cnt" id="cnt-medium">0</span></button>
+      <button class="sev-filter LOW" data-sev="LOW">LOW <span class="sev-cnt" id="cnt-low">0</span></button>
     </div>
-    <div id="alert-feed" class="alert-feed">
-      <div class="empty-state" id="alert-empty">
-        <div class="es-icon">⚡</div>
-        <div class="es-title">Queue is clear</div>
-        <div class="es-sub">Click <strong>+ New Alert</strong> to generate a realistic triage scenario.</div>
-      </div>
+
+    <div id="alert-feed">
+      <div class="empty-msg" id="alert-empty">No scenarios yet. Press <kbd>N</kbd> or click Generate.</div>
     </div>
   </section>
 
-  <!-- ─────────────────── PAGE: IR PLAYBOOKS ─────────────────── -->
+  <!-- ── IR PLAYBOOKS ── -->
   <section class="page" id="page-ir">
     <div class="page-head">
-      <div class="page-head-left">
-        <h1>Incident Response Playbooks</h1>
-        <div class="page-sub">Detect → Contain → Eradicate → Recover. Click any playbook to expand.</div>
-      </div>
+      <h1>IR Playbooks</h1>
       <div class="page-actions">
         <button class="btn-ghost btn-sm" id="btn-ir-expand-all">Expand All</button>
         <button class="btn-ghost btn-sm" id="btn-ir-collapse-all">Collapse All</button>
       </div>
     </div>
-    <div id="ir-accordion" class="accordion"></div>
+    <div id="ir-accordion"></div>
   </section>
 
-  <!-- ─────────────────── PAGE: PENTEST HELPER ─────────────────── -->
+  <!-- ── PENTEST HELPER ── -->
   <section class="page" id="page-pentest">
     <div class="page-head">
-      <div class="page-head-left">
-        <h1>Pentest Helper</h1>
-        <div class="page-sub">Quick-reference cheat sheets. Click a section to expand.</div>
-      </div>
+      <h1>Pentest Helper</h1>
       <div class="page-actions">
         <button class="btn-ghost btn-sm" id="btn-pt-expand-all">Expand All</button>
         <button class="btn-ghost btn-sm" id="btn-pt-collapse-all">Collapse All</button>
       </div>
     </div>
-    <div id="pentest-list" class="ref-list"></div>
+    <div id="pentest-list"></div>
   </section>
 
-  <!-- ─────────────────── PAGE: INVESTIGATION HELPER ─────────────────── -->
+  <!-- ── INVESTIGATION HELPER ── -->
   <section class="page" id="page-investigation">
     <div class="page-head">
       <h1>Investigation Helper</h1>
     </div>
-    <div id="inv-list" class="ref-list"></div>
+    <div id="inv-list"></div>
   </section>
 
-  <!-- ─────────────────── PAGE: NOTES ─────────────────── -->
-  <section class="page" id="page-notes">
-    <div class="page-head">
-      <div class="page-head-left">
-        <h1>Analyst Notes</h1>
-        <div class="page-sub">Auto-saved. All data stored locally in your browser.</div>
-      </div>
-      <div class="page-actions">
-        <button class="btn-ghost btn-sm" id="btn-export-notes">Export .txt</button>
-        <button class="btn-ghost btn-sm btn-danger" id="btn-clear-notes">Clear Notes</button>
-      </div>
-    </div>
-
-    <div class="notes-grid">
-
-      <div class="card notes-main">
-        <div class="card-hdr">Case Notes</div>
-        <div class="card-body">
-          <div class="form-field">
-            <label for="notes-title">Case / Incident Title</label>
-            <input type="text" id="notes-title" placeholder="e.g. INC-2024-0047 — Phishing Campaign Q4" />
-          </div>
-          <div class="form-field">
-            <label for="notes-body">Investigation Notes</label>
-            <textarea id="notes-body" rows="10" placeholder="Document your findings, analysis, timeline observations, and decisions here. Be specific — include timestamps, hostnames, usernames, and exact log entries."></textarea>
-          </div>
-        </div>
-      </div>
-
-      <div class="card notes-timeline">
-        <div class="card-hdr card-hdr-action">
-          <span>Investigation Timeline</span>
-          <button class="btn-mini" id="btn-add-timeline-entry">+ Add Entry</button>
-        </div>
-        <div class="card-body">
-          <div id="timeline-add-form" class="inline-form" style="display:none">
-            <textarea id="timeline-entry-text" rows="2" placeholder="What happened? Timestamp will be added automatically."></textarea>
-            <div class="inline-form-actions">
-              <button class="btn-primary btn-sm" id="btn-timeline-submit">Add</button>
-              <button class="btn-ghost btn-sm" id="btn-timeline-cancel">Cancel</button>
-            </div>
-          </div>
-          <div id="timeline-list" class="timeline-list">
-            <div class="empty-msg">No timeline entries yet. Add entries to track the investigation progression.</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card notes-iocs">
-        <div class="card-hdr">Indicators of Compromise</div>
-        <div class="card-body">
-          <div class="ioc-grid">
-            <div class="form-field">
-              <label for="ioc-ips">IP Addresses</label>
-              <textarea id="ioc-ips" rows="4" placeholder="One per line"></textarea>
-            </div>
-            <div class="form-field">
-              <label for="ioc-domains">Domains / URLs</label>
-              <textarea id="ioc-domains" rows="4" placeholder="One per line"></textarea>
-            </div>
-            <div class="form-field">
-              <label for="ioc-hashes">File Hashes</label>
-              <textarea id="ioc-hashes" rows="4" placeholder="MD5 / SHA1 / SHA256, one per line"></textarea>
-            </div>
-            <div class="form-field">
-              <label for="ioc-users">Usernames / Accounts</label>
-              <textarea id="ioc-users" rows="4" placeholder="One per line"></textarea>
-            </div>
-            <div class="form-field">
-              <label for="ioc-hosts">Hostnames / Systems</label>
-              <textarea id="ioc-hosts" rows="4" placeholder="One per line"></textarea>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card notes-evidence">
-        <div class="card-hdr card-hdr-action">
-          <span>Evidence Tracker</span>
-          <button class="btn-mini" id="btn-add-evidence">+ Add</button>
-        </div>
-        <div class="card-body">
-          <div id="evidence-add-form" class="inline-form" style="display:none">
-            <input type="text" id="ev-source" placeholder="Source (e.g. Windows Security Log, Firewall, EDR alert)" />
-            <textarea id="ev-notes" rows="2" placeholder="What does this evidence show? Be specific."></textarea>
-            <div class="inline-form-actions">
-              <button class="btn-primary btn-sm" id="btn-ev-submit">Add</button>
-              <button class="btn-ghost btn-sm" id="btn-ev-cancel">Cancel</button>
-            </div>
-          </div>
-          <div id="evidence-list" class="evidence-list">
-            <div class="empty-msg">No evidence entries yet.</div>
-          </div>
-        </div>
-      </div>
-
-    </div>
-  </section>
-
-  <!-- ─────────────────── PAGE: TO-DO ─────────────────── -->
+  <!-- ── TO-DO ── -->
   <section class="page" id="page-todo">
     <div class="page-head">
-      <div class="page-head-left">
-        <h1>Shift To-Do</h1>
-        <div class="page-sub">Track tasks for this shift. Auto-saved.</div>
-      </div>
-      <div class="page-actions">
-        <button class="btn-ghost btn-sm btn-danger" id="btn-clear-done">Clear Completed</button>
-      </div>
+      <h1>To-Do</h1>
     </div>
 
-    <div class="todo-stats" id="todo-stats">
-      <div class="todo-stat"><span id="stat-total" class="stat-n">0</span><span class="stat-l">Total</span></div>
-      <div class="todo-stat"><span id="stat-pending" class="stat-n">0</span><span class="stat-l">Pending</span></div>
-      <div class="todo-stat"><span id="stat-done" class="stat-n">0</span><span class="stat-l">Done</span></div>
+    <div class="todo-add">
+      <input type="text" id="todo-input" placeholder="New task…" autocomplete="off" />
+      <select id="todo-priority">
+        <option value="medium">Medium</option>
+        <option value="high">High</option>
+        <option value="low">Low</option>
+      </select>
+      <button class="btn-primary" id="btn-add-todo">Add</button>
     </div>
 
-    <div class="card todo-add-card">
-      <div class="todo-add-form">
-        <input type="text" id="todo-input" placeholder="Add a task… (Enter to add)" autocomplete="off" />
-        <select id="todo-priority">
-          <option value="high">High</option>
-          <option value="medium" selected>Medium</option>
-          <option value="low">Low</option>
-        </select>
-        <input type="date" id="todo-due" title="Optional due date" />
-        <button class="btn-primary" id="btn-add-todo">Add</button>
-      </div>
+    <div class="todo-meta">
+      <span>Total: <strong id="stat-total">0</strong></span>
+      <span>Pending: <strong id="stat-pending">0</strong></span>
+      <span>Done: <strong id="stat-done">0</strong></span>
+      <button class="btn-ghost btn-sm" id="btn-clear-done">Clear done</button>
     </div>
 
-    <div class="todo-controls">
-      <div class="tc-group">
-        <span class="tc-label">Sort:</span>
-        <button class="tc-btn active" data-sort="priority">Priority</button>
-        <button class="tc-btn" data-sort="due">Due Date</button>
-        <button class="tc-btn" data-sort="created">Added</button>
-      </div>
-      <div class="tc-group">
-        <span class="tc-label">Show:</span>
-        <button class="tc-btn active" data-filter="all">All</button>
-        <button class="tc-btn" data-filter="pending">Pending</button>
-        <button class="tc-btn" data-filter="done">Done</button>
-      </div>
-    </div>
-
-    <div id="todo-list" class="todo-list">
-      <div class="empty-state" id="todo-empty">
-        <div class="es-icon">✓</div>
-        <div class="es-title">No tasks</div>
-        <div class="es-sub">Add your first task above to get started.</div>
-      </div>
+    <div id="todo-list">
+      <div class="empty-msg" id="todo-empty">No tasks yet.</div>
     </div>
   </section>
 
-  <!-- ─────────────────── PAGE: GOVERNANCE ─────────────────── -->
-  <section class="page" id="page-governance">
+  <!-- ── NIS2 ── -->
+  <section class="page" id="page-nis2">
     <div class="page-head">
-      <h1>Governance &amp; Risk</h1>
+      <h1>NIS2 Quick Reference</h1>
     </div>
-    <div id="gov-list" class="ref-list"></div>
+    <div id="nis2-container"></div>
   </section>
 
-  <!-- ─────────────────── PAGE: SETTINGS ─────────────────── -->
+  <!-- ── SETTINGS ── -->
   <section class="page" id="page-settings">
     <div class="page-head">
       <h1>Settings</h1>
     </div>
-    <div class="settings-grid">
 
+    <div class="settings-grid">
       <div class="card">
         <div class="card-hdr">Data Management</div>
         <div class="card-body">
           <div class="setting-row">
-            <div class="setting-info">
-              <div class="setting-name">Export All Data</div>
-              <div class="setting-desc">Download a JSON backup of all notes, tasks, cases, and alerts.</div>
-            </div>
-            <button class="btn-ghost btn-sm" id="btn-export-all">Export JSON</button>
+            <span>Export all data</span>
+            <button class="btn-primary btn-sm" id="btn-export-all">Export JSON</button>
           </div>
           <div class="setting-row">
-            <div class="setting-info">
-              <div class="setting-name">Import Backup</div>
-              <div class="setting-desc">Restore from a previously exported JSON backup file.</div>
-            </div>
-            <label class="btn-ghost btn-sm" for="import-file" style="cursor:pointer">Import JSON</label>
-            <input type="file" id="import-file" accept=".json" style="display:none" />
+            <span>Import from backup</span>
+            <label class="btn-ghost btn-sm import-lbl">
+              Import JSON
+              <input type="file" id="import-file" accept=".json" hidden />
+            </label>
           </div>
           <div class="setting-row">
-            <div class="setting-info">
-              <div class="setting-name">Reset Application</div>
-              <div class="setting-desc">Clear all stored data permanently. This cannot be undone.</div>
-            </div>
-            <button class="btn-ghost btn-sm btn-danger" id="btn-reset-all">Reset All</button>
+            <span>Reset all data</span>
+            <button class="btn-danger btn-sm" id="btn-reset-all">Reset All</button>
           </div>
         </div>
       </div>
@@ -442,51 +243,29 @@
         <div class="card-hdr">Preferences</div>
         <div class="card-body">
           <div class="setting-row">
-            <div class="setting-info">
-              <div class="setting-name">Compact Mode</div>
-              <div class="setting-desc">Reduce spacing throughout the interface for denser information display.</div>
-            </div>
-            <label class="toggle-wrap" for="pref-compact">
-              <input type="checkbox" id="pref-compact" />
-              <span class="toggle-slider"></span>
-            </label>
+            <span>Compact mode</span>
+            <label class="toggle-wrap"><input type="checkbox" id="pref-compact" /><span class="toggle-slider"></span></label>
           </div>
           <div class="setting-row">
-            <div class="setting-info">
-              <div class="setting-name">Collapse Sidebar</div>
-              <div class="setting-desc">Show icons only — hides text labels for more workspace width.</div>
-            </div>
-            <label class="toggle-wrap" for="pref-collapsed">
-              <input type="checkbox" id="pref-collapsed" />
-              <span class="toggle-slider"></span>
-            </label>
+            <span>Collapsed sidebar</span>
+            <label class="toggle-wrap"><input type="checkbox" id="pref-collapsed" /><span class="toggle-slider"></span></label>
           </div>
         </div>
       </div>
 
-      <div class="card settings-about">
-        <div class="card-hdr">About</div>
+      <div class="card">
+        <div class="card-hdr">Keyboard Shortcuts</div>
         <div class="card-body">
-          <p class="about-p">CyberWorkbench is a fully offline cybersecurity operations assistant designed for SOC analysts, incident responders, and security practitioners.</p>
-          <p class="about-p">It runs entirely in your browser — no server, no account, no internet required. All data is stored locally using <code>localStorage</code>. Export backups regularly to avoid data loss if you clear browser storage.</p>
-          <p class="about-p">Use it as your daily companion for shift management, incident tracking, triage practice, and quick reference during active investigations.</p>
-          <div class="about-meta">
-            <span class="tag">Version 2.0</span>
-            <span class="tag">Offline</span>
-            <span class="tag">No backend</span>
-            <span class="tag">No tracking</span>
-          </div>
+          <div class="setting-row"><kbd>1</kbd>–<kbd>8</kbd><span>Switch pages</span></div>
+          <div class="setting-row"><kbd>N</kbd><span>Generate scenario (SOC page)</span></div>
         </div>
       </div>
-
     </div>
   </section>
 
 </main>
 
-<!-- Toast notification -->
-<div class="toast" id="toast" role="status" aria-live="polite"></div>
-
+<div class="toast" id="toast"></div>
 <script src="js/app.js"></script>
 </body>
 </html>
