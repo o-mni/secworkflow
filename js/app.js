@@ -1,1975 +1,591 @@
-// ── SecWorkflow Application ───────────────────────────────────────────────────
+'use strict';
 
-// ── Security utilities ────────────────────────────────────────────────────────
+/* ════════════════════════════════════════════════════
+   CLOCK & SHIFT TIMER
+════════════════════════════════════════════════════ */
+const shiftStart = Date.now();
 
-/** HTML-escape a value before inserting into innerHTML. */
-function escHTML(str) {
-  if (str == null) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;');
+function updateClock() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  document.getElementById('clock-time').textContent =
+    `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())}`;
+
+  const elapsed = Math.floor((Date.now() - shiftStart) / 1000);
+  const h = Math.floor(elapsed / 3600);
+  const m = Math.floor((elapsed % 3600) / 60);
+  const s = elapsed % 60;
+  document.getElementById('shift-timer').textContent =
+    h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+/* ════════════════════════════════════════════════════
+   TAB NAVIGATION
+════════════════════════════════════════════════════ */
+function switchTab(panelName) {
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.panel === panelName);
+    b.setAttribute('aria-selected', b.dataset.panel === panelName);
+  });
+  document.querySelectorAll('.panel').forEach(p => {
+    p.classList.toggle('active', p.id === `panel-${panelName}`);
+  });
 }
 
-const VALID_STATUSES = new Set([
-  // Pentest statuses
-  'not-started','in-progress','not-vulnerable','vulnerable','not-in-scope','cannot-verify',
-  // Consultant statuses
-  'not-assessed','compliant','partially-compliant','not-compliant','not-applicable',
-]);
-const VALID_SEVERITIES = new Set(['critical','high','medium','low','info']);
+document.getElementById('tab-nav').addEventListener('click', e => {
+  const btn = e.target.closest('.tab-btn');
+  if (btn) switchTab(btn.dataset.panel);
+});
 
-/** Sanitise and validate a single item-state record from untrusted input (e.g. imported JSON). */
-function sanitiseItemState(raw) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
-  return {
-    status:           VALID_STATUSES.has(raw.status)   ? raw.status           : 'not-started',
-    severityOverride: VALID_SEVERITIES.has(raw.severityOverride) ? raw.severityOverride : null,
-    notes:            (() => {
-      if (Array.isArray(raw.notes)) {
-        return raw.notes.filter(e => e && typeof e.text === 'string').map(e => ({ text: e.text.slice(0, 50000), ts: typeof e.ts === 'string' ? e.ts : '' }));
-      }
-      // Migrate from old single-string note field
-      if (typeof raw.note === 'string' && raw.note) return [{ text: raw.note.slice(0, 50000), ts: typeof raw.updatedAt === 'string' ? raw.updatedAt : '' }];
-      return [];
-    })(),
-    evidence:         typeof raw.evidence    === 'string' ? raw.evidence.slice(0, 100000)   : '',
-    cves:             (() => {
-      if (Array.isArray(raw.cves)) return raw.cves.filter(c => typeof c === 'string' && c.trim()).map(c => c.trim().slice(0, 100));
-      if (typeof raw.cves === 'string' && raw.cves) return raw.cves.split(/[,\s]+/).map(c => c.trim()).filter(Boolean);
-      return [];
-    })(),
-    isFinding:        Boolean(raw.isFinding),
-    outOfScope:       Boolean(raw.outOfScope),
-    updatedAt:        typeof raw.updatedAt   === 'string' ? raw.updatedAt                   : '',
-  };
-}
-
-/** Sanitise project metadata from untrusted input. */
-function sanitiseMetadata(raw) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
-  const str = (v, max = 500) => (typeof v === 'string' ? v.slice(0, max) : '');
-  const VALID_CLASSIFS = new Set(['CONFIDENTIAL','TLP:RED','TLP:AMBER','TLP:GREEN','INTERNAL']);
-  return {
-    projectName:    str(raw.projectName, 200)  || 'Untitled Project',
-    client:         str(raw.client, 200)        || 'Client',
-    assessor:       str(raw.assessor, 300),
-    classification: VALID_CLASSIFS.has(raw.classification) ? raw.classification : 'CONFIDENTIAL',
-    version:        str(raw.version, 20)        || '1.0',
-    startDate:      /^\d{4}-\d{2}-\d{2}$/.test(raw.startDate) ? raw.startDate : '',
-    endDate:        /^\d{4}-\d{2}-\d{2}$/.test(raw.endDate)   ? raw.endDate   : '',
-    scope:          str(raw.scope, 5000),
-    exclusions:     str(raw.exclusions, 5000),
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-const STORAGE_KEY      = 'secworkflow_v1';
-const STORAGE_MODE_KEY = 'secworkflow_storage_mode'; // 'session' | 'local' (local is default)
-const WELCOMED_KEY     = 'secworkflow_welcomed';
-
-// Build combined label/color maps from both status sets
-const ALL_STATUSES_COMBINED = [...STATUSES, ...CONSULTANT_STATUSES.filter(s => !STATUSES.find(p => p.value === s.value))];
-const STATUS_LABELS = Object.fromEntries(ALL_STATUSES_COMBINED.map(s => [s.value, s.label]));
-const STATUS_COLORS = Object.fromEntries(ALL_STATUSES_COMBINED.map(s => [s.value, s.color]));
-
-class SecWorkflowApp {
-  constructor() {
-    // Default storage mode is 'local' — only fall back to session if explicitly set
-    const savedMode = localStorage.getItem(STORAGE_MODE_KEY);
-    const initialMode = savedMode === 'session' ? 'session' : 'local';
-
-    this.state = {
-      currentModuleId: null,
-      currentType: 'pentest',
-      modeSelected: false,         // true once user has picked pentest or consultant
-      metadata: {
-        projectName: 'Untitled Project',
-        client: 'Client',
-        assessor: '',
-        classification: 'CONFIDENTIAL',
-        startDate: '',
-        endDate: '',
-        scope: '',
-        exclusions: '',
-        version: '1.0',
+/* ════════════════════════════════════════════════════
+   ALERT TEMPLATES
+════════════════════════════════════════════════════ */
+const ALERTS = [
+  {
+    type: 'Suspicious Login Detected',
+    icon: '🔐',
+    sev: 'HIGH',
+    variants: [
+      {
+        desc: '47 failed SSH login attempts from 185.220.101.x within 3 minutes, followed by successful authentication as service account "svc-backup".',
+        interp: 'Brute-force succeeded. Service accounts shouldn\'t be accessible via SSH — this is likely a compromised credential used by an attacker.',
+        actions: [
+          'Lock "svc-backup" immediately and revoke all active sessions',
+          'Check auth logs for lateral movement from this IP in the past 6 hours',
+          'Open IR Playbook: Suspicious Login — initiate full investigation'
+        ]
       },
-      itemStates: {},
-      customGroups: [],             // user-defined groups/items for the Custom Checks module
-      collapseStates: {},           // persists group collapse/expand per module
-      sortOrder: 'default',         // 'default' | 'severity' | 'status' | 'findings'
-      filters: { status: 'all', severity: 'all', tag: 'all', search: '', findingsOnly: false },
-      filterBarOpen: false,
-      storageMode: initialMode,
-    };
-    this.panelItemId = null;
-    this._sessionDirty = false;          // true when unsaved work exists in Session Mode
-    this._pendingImportFile = null;      // staged file waiting for import confirmation
-    this._moduleCompleteToasted = false; // prevents repeat completion toasts per module
-    this._panelNotes = [];               // working copy of notes for the open panel
-    this._panelCves  = [];               // working copy of CVEs for the open panel
-    this.reportGen = new ReportGenerator(this);
-    this._loadFromStorage();
-    this._syncCustomModule();
-    this._init();
-  }
-
-  // Returns the appropriate status list for the current assessment type
-  _getStatusesForType() {
-    return this.state.currentType === 'consultant' ? CONSULTANT_STATUSES : STATUSES;
-  }
-
-  // ── Custom Checks sync ────────────────────────────────────────────────────
-
-  /** Rebuild MODULE_CUSTOM.groups from state so all existing code sees the items. */
-  _syncCustomModule() {
-    MODULE_CUSTOM.groups.length = 0;
-    for (const g of this.state.customGroups) {
-      MODULE_CUSTOM.groups.push({
-        id: g.id,
-        name: g.name,
-        items: g.items.map(i => ({ ...i, _custom: true })),
-      });
-    }
-  }
-
-  // Tag chip state for the modal
-  _modalTags = [];
-
-  _openCustomCheckModal(groupId = null, editItem = null) {
-    // Ensure at least one group exists
-    if (this.state.customGroups.length === 0) {
-      this.state.customGroups.push({ id: 'custom-group-default', name: 'Custom Checks', items: [] });
-    }
-
-    // Populate group dropdown
-    const groupSel = document.getElementById('custom-check-group');
-    groupSel.innerHTML = '';
-    for (const g of this.state.customGroups) {
-      const opt = document.createElement('option');
-      opt.value = g.id;
-      opt.textContent = g.name;
-      if (g.id === groupId) opt.selected = true;
-      groupSel.appendChild(opt);
-    }
-
-    // Reset new-group inline form
-    document.getElementById('custom-new-group-row').style.display = 'none';
-    document.getElementById('custom-new-group-name').value = '';
-
-    const isEdit = !!editItem;
-    document.getElementById('custom-check-edit-id').value = editItem?.id || '';
-    document.getElementById('modal-custom-check-title').textContent = isEdit ? 'Edit Custom Check' : 'Add Custom Check';
-    document.getElementById('modal-custom-check-subtitle').textContent = isEdit
-      ? 'Update the definition for this check.'
-      : 'Add a check item to your pentest checklist.';
-    document.getElementById('modal-custom-check-icon').textContent = isEdit ? '✏️' : '＋';
-    document.getElementById('btn-save-custom-check').textContent = isEdit ? 'Save Changes' : 'Add Check';
-
-    // Fields
-    document.getElementById('custom-check-title-input').value = editItem?.title || '';
-    document.getElementById('custom-check-description').value = editItem?.description || '';
-
-    // Severity picker
-    const sev = editItem?.severity || 'medium';
-    document.getElementById('custom-check-severity').value = sev;
-    document.querySelectorAll('.sev-pick-btn').forEach(b => {
-      b.classList.toggle('active', b.dataset.sev === sev);
-    });
-
-    // Tag chips
-    this._modalTags = editItem?.tags ? [...editItem.tags] : [];
-    this._renderModalTags();
-
-    // Select the right group when editing
-    if (isEdit) {
-      for (const g of this.state.customGroups) {
-        if (g.items.some(i => i.id === editItem.id)) { groupSel.value = g.id; break; }
+      {
+        desc: 'Admin account "jdoe-admin" successfully logged in from 37.48.x.x (RU geolocation) at 03:14 UTC. User is US-based. MFA was not triggered.',
+        interp: 'Geo anomaly + no MFA = likely account takeover. The attacker may have stolen credentials and bypassed or downgraded MFA.',
+        actions: [
+          'Force global sign-out on all sessions and lock the account',
+          'Audit for email forwarding rules, OAuth app grants, and added delegates',
+          'Contact user via phone (not email) to confirm — then reset credentials + re-enroll MFA'
+        ]
       }
-    }
-
-    // Show/hide group field (hide for edits if only 1 group)
-    document.getElementById('custom-group-field').style.display =
-      (isEdit && this.state.customGroups.length <= 1) ? 'none' : '';
-
-    document.getElementById('modal-custom-check').style.display = 'flex';
-    setTimeout(() => document.getElementById('custom-check-title-input').focus(), 60);
-  }
-
-  _renderModalTags() {
-    const list = document.getElementById('tag-chips-list');
-    list.innerHTML = '';
-    for (const tag of this._modalTags) {
-      const chip = document.createElement('span');
-      chip.className = 'tag-chip';
-      chip.innerHTML = `${escHTML(tag)}<button class="tag-chip-remove" data-tag="${escHTML(tag)}" title="Remove">✕</button>`;
-      chip.querySelector('.tag-chip-remove').addEventListener('click', () => {
-        this._modalTags = this._modalTags.filter(t => t !== tag);
-        this._renderModalTags();
-      });
-      list.appendChild(chip);
-    }
-  }
-
-  _addModalTag(raw) {
-    const tag = raw.trim().toLowerCase().replace(/[^a-z0-9\-_.]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-    if (!tag || this._modalTags.includes(tag) || this._modalTags.length >= 10) return;
-    this._modalTags.push(tag);
-    this._renderModalTags();
-  }
-
-  _saveCustomCheck() {
-    const title = document.getElementById('custom-check-title-input').value.trim();
-    if (!title) {
-      document.getElementById('custom-check-title-input').focus();
-      this._showToast('Title is required', 'error');
-      return;
-    }
-
-    const groupSel = document.getElementById('custom-check-group');
-    let groupId = groupSel.value;
-    const description = document.getElementById('custom-check-description').value.trim();
-    const severity = document.getElementById('custom-check-severity').value || 'medium';
-    const tags = [...this._modalTags];
-    const editId = document.getElementById('custom-check-edit-id').value;
-
-    if (editId) {
-      let found = false;
-      for (const g of this.state.customGroups) {
-        const idx = g.items.findIndex(i => i.id === editId);
-        if (idx !== -1) {
-          const item = g.items[idx];
-          item.title = title;
-          item.description = description;
-          item.severity = severity;
-          item.tags = tags;
-          if (g.id !== groupId) {
-            g.items.splice(idx, 1);
-            const target = this.state.customGroups.find(x => x.id === groupId);
-            if (target) target.items.push(item);
-          }
-          found = true;
-          break;
-        }
+    ]
+  },
+  {
+    type: 'Malware Detected on Endpoint',
+    icon: '🦠',
+    sev: 'CRITICAL',
+    variants: [
+      {
+        desc: 'EDR flagged ransomware behavior on WORKSTATION-042: mass file encryption starting in Documents, shadow copy deletion via vssadmin, ransom note created in 14 directories.',
+        interp: 'Active ransomware execution — containment is the only priority right now. Do not reboot. Every second increases the blast radius.',
+        actions: [
+          'ISOLATE WORKSTATION-042 immediately — network quarantine via EDR or physical cable disconnect',
+          'Preserve RAM dump before any further action to capture encryption keys',
+          'Verify backups are intact and isolated before declaring an incident scope'
+        ]
+      },
+      {
+        desc: 'Cobalt Strike beacon deployed via macro-enabled Word document on SRV-APP01. Process chain: WINWORD.EXE → powershell.exe → rundll32.exe (outbound C2 on port 443 to 194.165.x.x).',
+        interp: 'Active C2 implant with interactive access. The attacker is likely already conducting post-exploitation recon. Credential exposure is near-certain.',
+        actions: [
+          'Network-quarantine SRV-APP01 via EDR — do NOT just reboot',
+          'Block 194.165.x.x and its ASN at the firewall perimeter right now',
+          'Search all endpoints in the same subnet for the same process chain and beacon hash'
+        ]
       }
-      if (!found) { this._showToast('Check not found', 'error'); return; }
-    } else {
-      const group = this.state.customGroups.find(g => g.id === groupId);
-      if (!group) { this._showToast('Group not found', 'error'); return; }
-      const id = 'custom-item-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-      group.items.push({ id, title, description, severity, tags, frameworks: [], remediation: '' });
-    }
-
-    this._syncCustomModule();
-    this._saveToStorage();
-    document.getElementById('modal-custom-check').style.display = 'none';
-
-    if (this.state.currentModuleId === 'custom-checks') {
-      this._renderModule(MODULE_CUSTOM);
-      this._updateProgress(MODULE_CUSTOM);
-    }
-    this._renderSidebar();
-    this._showToast(editId ? 'Check updated' : 'Check added', 'success');
-  }
-
-  _openAddGroupInline() {
-    // Append an inline "new group" form at the bottom of the groups container
-    const existing = document.getElementById('inline-new-group-form');
-    if (existing) { existing.querySelector('input').focus(); return; }
-
-    const form = document.createElement('div');
-    form.id = 'inline-new-group-form';
-    form.className = 'custom-new-group-inline';
-    form.style.cssText = 'margin-top:12px;';
-    form.innerHTML = `
-      <input id="inline-new-group-input" placeholder="Group name…" maxlength="100" autocomplete="off" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;font-size:13px;outline:none;">
-      <button class="btn-create-group-confirm" type="button">Create group</button>
-      <button class="btn-create-group-cancel" type="button">✕</button>
-    `;
-    const input = form.querySelector('#inline-new-group-input');
-    const confirm = form.querySelector('.btn-create-group-confirm');
-    const cancel = form.querySelector('.btn-create-group-cancel');
-
-    const doCreate = () => {
-      const name = input.value.trim();
-      if (!name) { input.focus(); return; }
-      const id = 'custom-group-' + Date.now();
-      this.state.customGroups.push({ id, name, items: [] });
-      this._syncCustomModule();
-      this._saveToStorage();
-      this._renderModule(MODULE_CUSTOM);
-      this._updateProgress(MODULE_CUSTOM);
-      this._renderSidebar();
-    };
-    confirm.addEventListener('click', doCreate);
-    cancel.addEventListener('click', () => form.remove());
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); doCreate(); }
-      if (e.key === 'Escape') form.remove();
-    });
-
-    document.getElementById('checklist-groups').appendChild(form);
-    setTimeout(() => input.focus(), 40);
-  }
-
-  _confirmInlineNewGroup() {
-    const name = document.getElementById('custom-new-group-name').value.trim();
-    if (!name) { document.getElementById('custom-new-group-name').focus(); return; }
-    const id = 'custom-group-' + Date.now();
-    this.state.customGroups.push({ id, name, items: [] });
-    this._syncCustomModule();
-    this._saveToStorage();
-    // Add to dropdown and select it
-    const groupSel = document.getElementById('custom-check-group');
-    const opt = document.createElement('option');
-    opt.value = id; opt.textContent = name;
-    groupSel.appendChild(opt);
-    groupSel.value = id;
-    this._cancelInlineNewGroup();
-    this._renderSidebar();
-  }
-
-  _cancelInlineNewGroup() {
-    document.getElementById('custom-new-group-row').style.display = 'none';
-    document.getElementById('custom-new-group-name').value = '';
-  }
-
-  _deleteCustomItem(itemId) {
-    for (const g of this.state.customGroups) {
-      const idx = g.items.findIndex(i => i.id === itemId);
-      if (idx !== -1) {
-        g.items.splice(idx, 1);
-        break;
+    ]
+  },
+  {
+    type: 'Phishing Email Reported',
+    icon: '🎣',
+    sev: 'HIGH',
+    variants: [
+      {
+        desc: '3 users forwarded identical emails impersonating IT Help Desk with a link to "it-helpdesk-corp[.]com" (domain registered 2 days ago). Subject: "URGENT: Your password expires today."',
+        interp: 'Targeted credential harvesting. Lookalike domain freshly registered points to a planned attack. Urgency language designed to bypass critical thinking.',
+        actions: [
+          'Pull and remove the email from all inboxes via admin console now',
+          'Block it-helpdesk-corp[.]com at DNS and proxy — check for similar lookalike variants',
+          'Identify if anyone clicked — if yes, treat as account compromise and initiate playbook'
+        ]
+      },
+      {
+        desc: 'Email impersonating CFO requests urgent $48,000 wire transfer to new vendor. Sender domain registered yesterday. DMARC: FAIL. No reply threading with previous emails.',
+        interp: 'Business Email Compromise (BEC) targeting Finance. Urgency + authority impersonation are hallmarks. Financial impact could be immediate.',
+        actions: [
+          'Alert Finance team immediately — do NOT process the transfer',
+          'Call the CFO directly on a known number to verify — never reply to the email',
+          'Block sender domain and file abuse report with the email provider'
+        ]
       }
-    }
-    // Remove item state too
-    delete this.state.itemStates[itemId];
-    this._syncCustomModule();
-    this._saveToStorage();
-    if (this.state.currentModuleId === 'custom-checks') {
-      this._renderModule(MODULE_CUSTOM);
-      this._updateProgress(MODULE_CUSTOM);
-    }
-    this._renderSidebar();
-    this._showToast('Custom check deleted', 'info');
-  }
-
-  _deleteCustomGroup(groupId) {
-    const idx = this.state.customGroups.findIndex(g => g.id === groupId);
-    if (idx !== -1) {
-      // Remove item states for all items in this group
-      for (const item of this.state.customGroups[idx].items) {
-        delete this.state.itemStates[item.id];
+    ]
+  },
+  {
+    type: 'Abnormal Outbound Traffic',
+    icon: '📡',
+    sev: 'CRITICAL',
+    variants: [
+      {
+        desc: 'Periodic HTTPS connections from HOST-WIN-019 to 194.165.x.x every 60 seconds (±3s). Traffic volume: 2–4KB per request. IP matches documented Cobalt Strike C2 infrastructure.',
+        interp: 'Classic beacon pattern — consistent interval, small payload. HOST-WIN-019 has an active implant. The attacker has a shell and may be conducting post-exploitation.',
+        actions: [
+          'Block 194.165.x.x and its entire ASN at the perimeter firewall',
+          'Isolate HOST-WIN-019 — preserve memory dump before touching anything',
+          'Pivot: search proxy/firewall logs for other hosts that contacted this IP in the past 7 days'
+        ]
+      },
+      {
+        desc: 'DNS NXDOMAIN storm from 10.0.14.55: 3,200 failed lookups in 10 minutes to algorithmically generated domains (.com, .net, .org). Matches DGA malware signature pattern.',
+        interp: 'Host infected with DGA malware trying to reach C2. No connection has succeeded yet — this is a critical containment window before the implant activates.',
+        actions: [
+          'Isolate 10.0.14.55 before any C2 connection can be established',
+          'Sinkhole DGA domain pattern at internal DNS resolver to monitor without allowing resolution',
+          'Full EDR scan and memory forensics on the isolated host'
+        ]
       }
-      this.state.customGroups.splice(idx, 1);
-    }
-    this._syncCustomModule();
-    this._saveToStorage();
-    if (this.state.currentModuleId === 'custom-checks') {
-      this._renderModule(MODULE_CUSTOM);
-      this._updateProgress(MODULE_CUSTOM);
-    }
-    this._renderSidebar();
-    this._showToast('Group deleted', 'info');
-  }
-
-  // ── Initialisation ─────────────────────────────────────────────────────────
-
-  _init() {
-    this._renderSidebar();
-    this._populateTagFilter();
-    this._populateFilterStatuses();
-    this._bindStaticEvents();
-    this._syncMetaToUI();
-
-    // If a mode was previously selected and a module loaded, restore it
-    if (this.state.modeSelected && this.state.currentModuleId) {
-      this._activateMode(this.state.currentType, false);
-      this._loadModule(this.state.currentModuleId);
-    } else if (this.state.modeSelected) {
-      this._activateMode(this.state.currentType, false);
-      // Show welcome screen still (no module selected)
-      this._showWelcomeScreen();
-    } else {
-      this._showWelcomeScreen();
-    }
-    this._syncStorageModeUI();
-    this._syncSidebarModeBar();
-    this._updateDocTitle();
-    this._checkFirstRun();
-  }
-
-  _showWelcomeScreen() {
-    document.getElementById('welcome-screen').style.display = '';
-    document.getElementById('checklist-container').style.display = 'none';
-  }
-
-  _bindStaticEvents() {
-    // Mode selector: "Change" button in sidebar returns to welcome screen
-    document.getElementById('btn-change-mode')?.addEventListener('click', () => {
-      this.state.modeSelected = false;
-      this.state.currentModuleId = null;
-      this._saveToStorage();
-      this._showWelcomeScreen();
-      this._syncSidebarModeBar();
-    });
-
-    // Sort order in sidebar
-    document.getElementById('sort-select')?.addEventListener('change', (e) => {
-      this.state.sortOrder = e.target.value;
-      if (this.state.currentModuleId) {
-        this._renderModule(MODULE_MAP[this.state.currentModuleId]);
+    ]
+  },
+  {
+    type: 'Data Exfiltration Suspected',
+    icon: '📤',
+    sev: 'CRITICAL',
+    variants: [
+      {
+        desc: '4.2GB uploaded to mega.nz from FINANCE-PC-07 between 23:00 and 01:30. DLP alert triggered. User has a scheduled departure in 5 days. HR was notified 2 weeks ago.',
+        interp: 'High-confidence insider threat pattern: large after-hours upload, sensitive financial system access, known upcoming departure. Deliberate staging likely.',
+        actions: [
+          'Preserve forensic image of FINANCE-PC-07 immediately — do NOT alert the user yet',
+          'Block mega.nz and personal cloud storage at the proxy — document the restriction',
+          'Escalate to HR and legal before any further action — evidence chain is critical here'
+        ]
+      },
+      {
+        desc: 'Archive files (.7z, .rar) created in C:\\Temp from \\\\FILESERVER\\Confidential over 2 hours, then synced to personal OneDrive. 8.7GB across 1,240 files.',
+        interp: 'Deliberate staging and exfiltration pattern. Selection of the Confidential share shows intentional targeting, not accidental transfer.',
+        actions: [
+          'Revoke OneDrive sync and disable cloud storage access for this user',
+          'Pull exact audit trail of which files were staged and exported',
+          'Escalate to legal — scope may trigger breach notification obligations'
+        ]
       }
-    });
-
-    // Top bar buttons
-    document.getElementById('btn-filter-toggle').addEventListener('click', () => this._toggleFilterBar());
-    document.getElementById('btn-import').addEventListener('click', () => document.getElementById('import-file-input').click());
-    document.getElementById('btn-confirm-import').addEventListener('click', () => this._doImport());
-    document.getElementById('import-file-input').addEventListener('change', e => this._stageImport(e));
-    document.getElementById('btn-export-json').addEventListener('click', () => this._exportJSON());
-    document.getElementById('btn-export-md').addEventListener('click', () => this._exportMarkdown());
-    document.getElementById('btn-report').addEventListener('click', () => this._exportHTML());
-    document.getElementById('btn-report-menu-toggle').addEventListener('click', (e) => {
-      e.stopPropagation();
-      document.getElementById('report-split-wrap').classList.toggle('open');
-    });
-    document.getElementById('btn-export-html-drop').addEventListener('click', () => {
-      document.getElementById('report-split-wrap').classList.remove('open');
-      this._exportHTML();
-    });
-    document.getElementById('btn-export-pdf-drop').addEventListener('click', () => {
-      document.getElementById('report-split-wrap').classList.remove('open');
-      this._exportReport();
-    });
-    document.getElementById('btn-project-meta').addEventListener('click', () => this._openMetaModal());
-
-    // Prominent Delete Local Data button
-    document.getElementById('btn-delete-data')?.addEventListener('click', () => this._requestClearLocalData());
-
-    // Custom check modal — save
-    document.getElementById('btn-save-custom-check').addEventListener('click', () => this._saveCustomCheck());
-
-    // Severity picker buttons
-    document.getElementById('custom-sev-picker').addEventListener('click', (e) => {
-      const btn = e.target.closest('.sev-pick-btn');
-      if (!btn) return;
-      document.querySelectorAll('.sev-pick-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById('custom-check-severity').value = btn.dataset.sev;
-    });
-
-    // Tag chip input
-    const tagInput = document.getElementById('custom-check-tags-input');
-    const tagChipBox = document.getElementById('tag-chip-input');
-    tagChipBox.addEventListener('click', () => tagInput.focus());
-    tagInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ',') {
-        e.preventDefault();
-        this._addModalTag(tagInput.value);
-        tagInput.value = '';
-      } else if (e.key === 'Backspace' && !tagInput.value && this._modalTags.length > 0) {
-        this._modalTags.pop();
-        this._renderModalTags();
+    ]
+  },
+  {
+    type: 'Lateral Movement Detected',
+    icon: '↔',
+    sev: 'CRITICAL',
+    variants: [
+      {
+        desc: 'WORKSTATION-011 accessed ADMIN$ shares on 12 other workstations within 4 minutes using domain admin "DA-svc". No scheduled admin activity was logged. Source: Sysmon 5145.',
+        interp: 'Active lateral movement using a compromised domain admin account. The attacker is using PsExec-style tooling and is spreading rapidly. Blast radius is growing.',
+        actions: [
+          'Segment network now — block SMB (445) and RDP (3389) between all workstations at switch level',
+          'Disable "DA-svc" and reset KRBTGT password twice to invalidate all Kerberos tickets',
+          'Treat all 12 target systems as compromised — isolate and investigate each'
+        ]
       }
-    });
-    tagInput.addEventListener('blur', () => {
-      if (tagInput.value.trim()) { this._addModalTag(tagInput.value); tagInput.value = ''; }
-    });
-
-    // New group inline form — show/hide
-    document.getElementById('btn-custom-new-group').addEventListener('click', () => {
-      document.getElementById('custom-new-group-row').style.display = '';
-      document.getElementById('custom-new-group-name').focus();
-    });
-    // Confirm new group
-    document.getElementById('btn-confirm-new-group').addEventListener('click', () => this._confirmInlineNewGroup());
-    document.getElementById('custom-new-group-name').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); this._confirmInlineNewGroup(); }
-      if (e.key === 'Escape') this._cancelInlineNewGroup();
-    });
-    // Cancel new group
-    document.getElementById('btn-cancel-new-group').addEventListener('click', () => this._cancelInlineNewGroup());
-
-    // Modal Enter key to save
-    document.getElementById('modal-custom-check').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA' && e.target.id !== 'custom-new-group-name') {
-        e.preventDefault();
-        this._saveCustomCheck();
+    ]
+  },
+  {
+    type: 'Credential Dumping Detected',
+    icon: '🔓',
+    sev: 'HIGH',
+    variants: [
+      {
+        desc: 'Sysmon Event 10: lsass.exe accessed by C:\\Users\\Public\\svhost32.exe (not svchost.exe). File hash matches known Mimikatz variant. Occurred 3 minutes ago on DESKTOP-HR-04.',
+        interp: 'Active LSASS credential dumping in progress. All domain credentials cached on DESKTOP-HR-04 must be treated as stolen and in attacker hands.',
+        actions: [
+          'Isolate DESKTOP-HR-04 immediately — all cached credentials are now compromised',
+          'Scan all endpoints for svhost32.exe by hash — this is likely not isolated',
+          'Begin enterprise-wide privileged credential rotation — start with domain admins and service accounts'
+        ]
       }
-    });
-
-    // Welcome screen export buttons
-    document.getElementById('btn-report-welcome')?.addEventListener('click', () => this._exportHTML());
-    document.getElementById('btn-report-pdf-welcome')?.addEventListener('click', () => this._exportReport());
-
-    // Data dropdown toggle
-    const dataMenuWrap = document.getElementById('data-menu-wrap');
-    document.getElementById('btn-data-menu').addEventListener('click', (e) => {
-      e.stopPropagation();
-      dataMenuWrap.classList.toggle('open');
-    });
-    document.addEventListener('click', () => {
-      dataMenuWrap.classList.remove('open');
-      document.getElementById('report-split-wrap')?.classList.remove('open');
-    });
-
-    // Classification picker
-    document.getElementById('classification-picker').addEventListener('click', (e) => {
-      const btn = e.target.closest('.classif-btn');
-      if (!btn) return;
-      document.querySelectorAll('.classif-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById('meta-classification').value = btn.dataset.value;
-    });
-
-
-    // Filters
-    document.getElementById('filter-status').addEventListener('change', e => { this.state.filters.status = e.target.value; this._applyFilters(); });
-    document.getElementById('filter-severity').addEventListener('change', e => { this.state.filters.severity = e.target.value; this._applyFilters(); });
-    document.getElementById('filter-tag').addEventListener('change', e => { this.state.filters.tag = e.target.value; this._applyFilters(); });
-    document.getElementById('filter-search').addEventListener('input', e => { this.state.filters.search = e.target.value; this._applyFilters(); });
-    document.getElementById('filter-findings-only').addEventListener('change', e => { this.state.filters.findingsOnly = e.target.checked; this._applyFilters(); });
-    document.getElementById('btn-filter-clear').addEventListener('click', () => this._clearFilters());
-
-    // Modals
-    document.querySelectorAll('.modal-close, [data-modal]').forEach(el => {
-      el.addEventListener('click', () => {
-        const modalId = el.dataset.modal || el.closest('.modal')?.id;
-        if (modalId) document.getElementById(modalId).style.display = 'none';
-      });
-    });
-    document.querySelectorAll('.modal-overlay').forEach(overlay => {
-      overlay.addEventListener('click', e => {
-        if (e.target === overlay) overlay.style.display = 'none';
-      });
-    });
-
-    // Meta modal
-    document.getElementById('btn-save-meta').addEventListener('click', () => this._saveMetaModal());
-
-    // Project name / client inline edit
-    document.getElementById('project-name-display').addEventListener('blur', e => {
-      this.state.metadata.projectName = e.target.textContent.trim() || 'Untitled Project';
-      this._saveToStorage();
-      this._updateDocTitle();
-    });
-    document.getElementById('project-client-display').addEventListener('blur', e => {
-      this.state.metadata.client = e.target.textContent.trim() || 'Client';
-      this._saveToStorage();
-    });
-
-    // Panel
-    document.getElementById('panel-close').addEventListener('click', () => this._closePanel());
-    document.getElementById('panel-close-btn').addEventListener('click', () => this._closePanel());
-    document.getElementById('panel-overlay').addEventListener('click', () => this._closePanel());
-
-    // Autosave on any panel field change
-    ['panel-status', 'panel-severity', 'panel-evidence', 'panel-is-finding', 'panel-out-of-scope'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) {
-        el.addEventListener('input',  () => this._applyPanelChanges());
-        el.addEventListener('change', () => this._applyPanelChanges());
+    ]
+  },
+  {
+    type: 'Web Application Attack',
+    icon: '🌐',
+    sev: 'MEDIUM',
+    variants: [
+      {
+        desc: 'WAF blocked 340 SQLi probes against /api/search from 45.155.x.x in 2 minutes. Payloads include UNION-based and time-based blind SQLi. All requests blocked.',
+        interp: 'Automated SQLi scanner probing the API. WAF is holding for now, but check for bypass attempts and pre-WAF requests that may have succeeded.',
+        actions: [
+          'Block 45.155.x.x and its ASN at the network perimeter',
+          'Review WAF logs for any requests that preceded or bypassed the current rule set',
+          'Verify /api/search uses parameterized queries — flag for code review if not confirmed'
+        ]
+      },
+      {
+        desc: 'Stored XSS found in user profile "Bio" field: payload exfiltrates document.cookie to external endpoint. Triggered on admin report page load. Two admins viewed the report today.',
+        interp: 'Active stored XSS targeting admin sessions. The two admins who viewed the report today may have had their session cookies exfiltrated to the attacker.',
+        actions: [
+          'Remove the malicious profile and sanitize the bio field server-side immediately',
+          'Rotate session tokens for both affected admins right now',
+          'Check proxy logs for outbound requests from admin IPs to the exfil endpoint'
+        ]
       }
-    });
-
-    // Add note — button click and Ctrl+Enter shortcut
-    document.getElementById('panel-notes-add').addEventListener('click', () => this._addNoteEntry());
-    document.getElementById('panel-notes-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); this._addNoteEntry(); }
-    });
-
-    // CVE tag input — Enter or comma to add
-    document.getElementById('panel-cves-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ',') {
-        e.preventDefault();
-        this._addCveChip(e.target.value);
-        e.target.value = '';
+    ]
+  },
+  {
+    type: 'Privileged Account Activity',
+    icon: '👑',
+    sev: 'MEDIUM',
+    variants: [
+      {
+        desc: 'Domain admin account "Administrator" used interactively on WORKSTATION-023 at 14:32 UTC. Policy prohibits DA accounts from logging into workstations. No change window was open.',
+        interp: 'Violation of least-privilege policy — could indicate an attacker using a stolen DA credential, or a sysadmin violating policy. Either scenario needs investigation.',
+        actions: [
+          'Confirm with the team if a legitimate admin was working on WORKSTATION-023 at that time',
+          'If unconfirmed — lock the session, treat as potential compromise, check what was run',
+          'Review recent actions of the Administrator account in the past 2 hours'
+        ]
       }
-    });
-    document.getElementById('panel-cves-input').addEventListener('blur', (e) => {
-      if (e.target.value.trim()) { this._addCveChip(e.target.value); e.target.value = ''; }
-    });
-
-    // Notes formatting toolbar
-    document.querySelectorAll('.pnt-btn').forEach(btn => {
-      btn.addEventListener('click', () => this._insertNoteFormat(btn.dataset.fmt));
-    });
-
-    // Prevent newlines in contenteditable project fields
-    ['project-name-display', 'project-client-display'].forEach(id => {
-      document.getElementById(id)?.addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
-      });
-    });
-
-    // (report generated directly — no modal)
-
-    // Storage mode toggle
-    document.getElementById('smt-session').addEventListener('click', () => {
-      if (this.state.storageMode !== 'session') this._requestSwitchToSession();
-    });
-    document.getElementById('smt-local').addEventListener('click', () => {
-      if (this.state.storageMode !== 'local') this._requestSwitchToLocal();
-    });
-    document.getElementById('btn-confirm-to-local').addEventListener('click', () => this._confirmSwitchToLocal());
-    document.getElementById('btn-confirm-to-session-keep').addEventListener('click', () => this._confirmSwitchToSession(false));
-    document.getElementById('btn-confirm-to-session-clear').addEventListener('click', () => this._confirmSwitchToSession(true));
-    document.getElementById('btn-confirm-clear-data').addEventListener('click', () => this._confirmClearLocalData());
-
-    // Warn before unload when unsaved work exists in Session Mode
-    window.addEventListener('beforeunload', (e) => {
-      if (this.state.storageMode === 'session' && this._sessionDirty) {
-        e.preventDefault();
-        e.returnValue = ''; // required for Chrome; shows browser-native dialog
-      }
-    });
-
-    // Welcome mode card click → activate mode and load first module
-    document.querySelectorAll('.welcome-mode-card[data-action]').forEach(card => {
-      const activate = () => {
-        const action = card.dataset.action;
-        if (action === 'report') { this._exportReport(); return; }
-        this._activateMode(action, true);
-      };
-      card.addEventListener('click', activate);
-      card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } });
-    });
-
-    // Keyboard shortcuts
-    document.addEventListener('keydown', (e) => {
-      const inInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName);
-
-      // Ctrl+/ — open filter bar and focus search
-      if ((e.ctrlKey || e.metaKey) && e.key === '/') {
-        e.preventDefault();
-        if (!this.state.filterBarOpen) this._toggleFilterBar();
-        setTimeout(() => document.getElementById('filter-search').focus(), 50);
-        return;
-      }
-
-      // Escape — close filter bar
-      if (e.key === 'Escape' && this.state.filterBarOpen) {
-        this._toggleFilterBar();
-        return;
-      }
-
-      // N — jump to next not-started item (when not typing)
-      if (e.key === 'n' && !e.ctrlKey && !e.metaKey && !inInput) {
-        e.preventDefault();
-        const next = document.querySelector('.checklist-item[data-status="not-started"]:not(.filtered-out)');
-        if (next) {
-          next.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          next.classList.add('highlight-pulse');
-          setTimeout(() => next.classList.remove('highlight-pulse'), 900);
-        } else {
-          this._showToast('No unchecked items remaining', 'info');
-        }
-      }
-    });
-
-    // Privacy notice dismiss
-    document.getElementById('btn-privacy-dismiss').addEventListener('click', () => this._dismissPrivacyNotice());
+    ]
   }
-
-  // ── Storage ────────────────────────────────────────────────────────────────
-
-  _saveToStorage() {
-    if (this.state.storageMode !== 'local') return; // Session Mode: no writes
-    try {
-      const now = new Date().toISOString();
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        version: 1,
-        metadata: this.state.metadata,
-        itemStates: this.state.itemStates,
-        customGroups: this.state.customGroups,
-        collapseStates: this.state.collapseStates,
-        currentModuleId: this.state.currentModuleId,
-        currentType: this.state.currentType,
-        modeSelected: this.state.modeSelected,
-        savedAt: now,
-      }));
-      // Live-update timestamps in topbar and sidebar
-      const timeStr = new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const savedAtEl = document.querySelector('.smt-saved-at');
-      if (savedAtEl) savedAtEl.textContent = ` · ${timeStr}`;
-      const projectSavedAt = document.getElementById('project-saved-at');
-      if (projectSavedAt && projectSavedAt.style.display !== 'none') {
-        projectSavedAt.textContent = `Last saved ${timeStr}`;
-      }
-    } catch (_) { /* storage full */ }
-  }
-
-  _loadFromStorage() {
-    if (this.state.storageMode !== 'local') return; // Session Mode: start fresh
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw);
-      if (saved.metadata) this.state.metadata = { ...this.state.metadata, ...saved.metadata };
-      if (saved.itemStates) this.state.itemStates = saved.itemStates;
-      if (Array.isArray(saved.customGroups)) this.state.customGroups = saved.customGroups;
-      if (saved.collapseStates) this.state.collapseStates = saved.collapseStates;
-      if (saved.currentModuleId) this.state.currentModuleId = saved.currentModuleId;
-      if (saved.currentType) this.state.currentType = saved.currentType;
-      if (saved.modeSelected) this.state.modeSelected = saved.modeSelected;
-    } catch (_) { /* ignore */ }
-  }
-
-  // ── Storage mode switching ─────────────────────────────────────────────────
-
-  _requestSwitchToLocal() {
-    document.getElementById('modal-to-local').style.display = 'flex';
-  }
-
-  _confirmSwitchToLocal() {
-    document.getElementById('modal-to-local').style.display = 'none';
-    this.state.storageMode = 'local';
-    this._sessionDirty = false; // data is now being persisted
-    localStorage.setItem(STORAGE_MODE_KEY, 'local');
-    this._saveToStorage(); // Persist current in-memory state immediately
-    this._syncStorageModeUI();
-    this._showToast('Local Mode enabled — data saved on this device', 'info');
-  }
-
-  _requestSwitchToSession() {
-    document.getElementById('modal-to-session').style.display = 'flex';
-  }
-
-  _confirmSwitchToSession(clearData) {
-    document.getElementById('modal-to-session').style.display = 'none';
-    this.state.storageMode = 'session';
-    localStorage.setItem(STORAGE_MODE_KEY, 'session'); // explicitly mark session (local is default)
-    if (clearData) {
-      localStorage.removeItem(STORAGE_KEY);
-      this._showToast('Session Mode — local data deleted', 'info');
-    } else {
-      this._showToast('Session Mode — local data preserved but no longer updated', 'info');
-    }
-    this._syncStorageModeUI();
-  }
-
-  _requestClearLocalData() {
-    document.getElementById('modal-clear-data').style.display = 'flex';
-  }
-
-  _confirmClearLocalData() {
-    document.getElementById('modal-clear-data').style.display = 'none';
-    localStorage.removeItem(STORAGE_KEY);
-    // Reset in-memory state to defaults
-    this.state.metadata = {
-      projectName: 'Untitled Project', client: 'Client', assessor: '',
-      classification: 'CONFIDENTIAL', startDate: '', endDate: '',
-      scope: '', exclusions: '', version: '1.0',
-    };
-    this.state.itemStates = {};
-    this.state.customGroups = [];
-    this.state.collapseStates = {};
-    this.state.currentModuleId = null;
-    this.state.currentType = 'pentest';
-    this._syncCustomModule();
-    this.state.modeSelected = false;
-    this._syncMetaToUI();
-    this._renderSidebar();
-    this._syncSidebarModeBar();
-    this._syncStorageModeUI();
-    this._updateDocTitle();
-    this._showWelcomeScreen();
-    this._closePanel();
-    this._showToast('All local data cleared — app reset to defaults', 'success');
-  }
-
-  _syncStorageModeUI() {
-    const isLocal = this.state.storageMode === 'local';
-    const hasLocalData = !!localStorage.getItem(STORAGE_KEY);
-
-    // Segmented control active state
-    document.getElementById('smt-session').classList.toggle('active', !isLocal);
-    document.getElementById('smt-local').classList.toggle('active', isLocal);
-
-    // Status label + optional saved-at timestamp
-    const statusEl = document.getElementById('smt-status');
-    if (isLocal) {
-      const savedAt = this._getLocalSavedAt();
-      statusEl.innerHTML = `Saved on this device${savedAt ? `<span class="smt-saved-at"> · ${savedAt}</span>` : ''}`;
-    } else {
-      statusEl.textContent = 'Session only — not saved locally';
-    }
-
-    // Topbar visual accent for Local Mode
-    document.querySelector('.topbar').classList.toggle('topbar-local-mode', isLocal);
-
-    // Prominent Delete Local Data button — visible when there's local data
-    const deleteBtn = document.getElementById('btn-delete-data');
-    if (deleteBtn) {
-      deleteBtn.style.display = (isLocal && hasLocalData) ? '' : 'none';
-    }
-
-    // Sidebar project card: show last-saved timestamp in Local Mode
-    const projectSavedAt = document.getElementById('project-saved-at');
-    if (projectSavedAt) {
-      if (isLocal && hasLocalData) {
-        const savedAt = this._getLocalSavedAt();
-        projectSavedAt.textContent = savedAt ? `Last saved ${savedAt}` : 'Saved on this device';
-        projectSavedAt.style.display = '';
-      } else {
-        projectSavedAt.style.display = 'none';
-      }
-    }
-  }
-
-  _getLocalSavedAt() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return null;
-      const saved = JSON.parse(raw);
-      if (saved.savedAt) {
-        return new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  // ── Document title ────────────────────────────────────────────────────────
-
-  _updateDocTitle() {
-    const projectName = this.state.metadata.projectName;
-    const hasProject = projectName && projectName !== 'Untitled Project';
-    const mod = this.state.currentModuleId ? MODULE_MAP[this.state.currentModuleId] : null;
-
-    let title;
-    if (hasProject && mod) {
-      title = `${projectName} | ${mod.name} | SecWorkflow`;
-    } else if (hasProject) {
-      title = `${projectName} | SecWorkflow`;
-    } else if (mod) {
-      title = `SecWorkflow | ${mod.name}`;
-    } else {
-      title = 'SecWorkflow';
-    }
-    document.title = title;
-  }
-
-  _checkFirstRun() {
-    if (localStorage.getItem(WELCOMED_KEY)) return;
-    document.getElementById('modal-privacy').style.display = 'flex';
-  }
-
-  _dismissPrivacyNotice() {
-    localStorage.setItem(WELCOMED_KEY, '1');
-    document.getElementById('modal-privacy').style.display = 'none';
-  }
-
-  // ── Mode activation ────────────────────────────────────────────────────────
-
-  _activateMode(type, loadFirst = true) {
-    this.state.currentType = type;
-    this.state.modeSelected = true;
-    this._populateFilterStatuses();
-    this._renderSidebar();
-    this._syncSidebarModeBar();
-    this._saveToStorage();
-
-    if (loadFirst) {
-      const mods = MODULES_BY_TYPE[type] || [];
-      if (mods.length > 0) this._loadModule(mods[0].id);
-    }
-  }
-
-  _syncSidebarModeBar() {
-    const bar = document.getElementById('sidebar-mode-bar');
-    const sortBar = document.getElementById('sidebar-sort-bar');
-    if (!bar) return;
-
-    if (this.state.modeSelected) {
-      bar.style.display = '';
-      if (sortBar) sortBar.style.display = '';
-      const icons = { pentest: '🔴', consultant: '📊' };
-      const labels = { pentest: 'Pentest Mode', consultant: 'Consultant Mode' };
-      document.getElementById('smb-mode-icon').textContent = icons[this.state.currentType] || '';
-      document.getElementById('smb-mode-text').textContent = labels[this.state.currentType] || '';
-    } else {
-      bar.style.display = 'none';
-      if (sortBar) sortBar.style.display = 'none';
-    }
-  }
-
-  // ── Populate filter status dropdown based on current mode ──────────────────
-
-  _populateFilterStatuses() {
-    const sel = document.getElementById('filter-status');
-    if (!sel) return;
-    const statuses = this._getStatusesForType();
-    sel.innerHTML = '<option value="all">All</option>' +
-      statuses.map(s => `<option value="${s.value}">${s.label}</option>`).join('');
-    // Reset filter if current value isn't valid for this mode
-    if (this.state.filters.status !== 'all' && !statuses.find(s => s.value === this.state.filters.status)) {
-      this.state.filters.status = 'all';
-    }
-    sel.value = this.state.filters.status;
-  }
-
-  // ── Sidebar ────────────────────────────────────────────────────────────────
-
-  _renderSidebar() {
-    const nav = document.getElementById('sidebar-nav');
-    const modules = MODULES_BY_TYPE[this.state.currentType] || [];
-
-    // Sync hidden tabs for any legacy code references
-    document.querySelectorAll('.sidebar-tab').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.type === this.state.currentType);
-    });
-
-    nav.innerHTML = '';
-    for (const mod of modules) {
-      const progress = this.getModuleProgress(mod);
-      const item = document.createElement('div');
-      item.className = `nav-item${mod.id === this.state.currentModuleId ? ' active' : ''}`;
-      item.dataset.moduleId = mod.id;
-
-      let badge = '';
-      if (progress.vulnerable > 0) {
-        badge = `<span class="nav-item-badge">${progress.vulnerable} vuln</span>`;
-      } else if (progress.inProgress > 0) {
-        badge = `<span class="nav-item-badge badge-warn">${progress.inProgress}</span>`;
-      } else if (progress.total > 0 && progress.compliant === progress.total) {
-        badge = `<span class="nav-item-badge badge-ok">✓</span>`;
-      }
-
-      item.innerHTML = `
-        <span class="nav-item-icon">${mod.icon}</span>
-        <span class="nav-item-label">${mod.name}</span>
-        ${badge}
-      `;
-      item.addEventListener('click', () => this._loadModule(mod.id));
-      nav.appendChild(item);
-    }
-  }
-
-  // ── Module Loading ─────────────────────────────────────────────────────────
-
-  _loadModule(moduleId) {
-    const module = MODULE_MAP[moduleId];
-    if (!module) return;
-
-    this.state.currentModuleId = moduleId;
-    this._saveToStorage();
-
-    // Update breadcrumb (with type prefix) and browser tab title
-    const typeLabel = this.state.currentType === 'pentest' ? 'Pentest' : 'Consultant';
-    document.getElementById('breadcrumb-text').textContent = `${typeLabel} / ${module.icon} ${module.name}`;
-    this._updateDocTitle();
-    this._moduleCompleteToasted = false;
-
-    // Show/hide screens
-    document.getElementById('welcome-screen').style.display = 'none';
-    document.getElementById('checklist-container').style.display = 'block';
-
-    // Update sidebar active state
-    document.querySelectorAll('.nav-item').forEach(el => {
-      el.classList.toggle('active', el.dataset.moduleId === moduleId);
-    });
-
-    this._renderModule(module);
-    this._updateProgress(module);
-  }
-
-  _renderModule(module) {
-    const header = document.getElementById('module-header');
-    const groups = document.getElementById('checklist-groups');
-    const isConsultant = this.state.currentType === 'consultant';
-
-    // Header
-    const progress = this.getModuleProgress(module);
-    const negativeColor = isConsultant ? STATUS_COLORS['not-compliant'] || STATUS_COLORS['vulnerable'] : STATUS_COLORS['vulnerable'];
-    const positiveColor = isConsultant ? STATUS_COLORS['compliant'] || STATUS_COLORS['not-vulnerable'] : STATUS_COLORS['not-vulnerable'];
-    const negativeLabel = isConsultant ? 'Non-Compliant' : 'Vulnerable';
-    const positiveLabel = isConsultant ? 'Compliant' : 'Compliant';
-
-    header.innerHTML = `
-      <div class="module-header-top">
-        <div class="module-header-icon">${module.icon}</div>
-        <div class="module-header-info">
-          <h2>${module.name}</h2>
-          <p>${module.description}</p>
-        </div>
-      </div>
-      <div class="module-header-stats">
-        <div class="stat-pill"><span class="stat-pill-dot" style="background:${negativeColor}"></span>${progress.vulnerable} ${negativeLabel}</div>
-        <div class="stat-pill"><span class="stat-pill-dot" style="background:${STATUS_COLORS['in-progress']}"></span>${progress.inProgress} In Progress</div>
-        <div class="stat-pill"><span class="stat-pill-dot" style="background:${positiveColor}"></span>${progress.compliant} ${positiveLabel}</div>
-        <div class="stat-pill"><span class="stat-pill-dot" style="background:${STATUS_COLORS['not-started']}"></span>${progress.notStarted} Not Started</div>
-        <div class="stat-pill"><span class="stat-pill-dot" style="background:${STATUS_COLORS['cannot-verify']}"></span>${progress.cannotVerify} Unverified</div>
-      </div>
-    `;
-
-    // Groups
-    groups.innerHTML = '';
-
-    // First-time tip (dismissible)
-    const tipDismissed = localStorage.getItem('sw_tip_dismissed') === '1';
-    const allPristine = module.groups.every(g =>
-      g.items.every(i => !this.state.itemStates[i.id] || ['not-started','not-assessed'].includes(this.state.itemStates[i.id].status))
-    );
-    if (allPristine && !tipDismissed) {
-      const tip = document.createElement('div');
-      tip.className = 'module-first-tip';
-      tip.innerHTML = `<span class="module-first-tip-icon">💡</span><span class="module-first-tip-text"> Click any row to open the detail panel — add notes, evidence, and set status. Use the chips on the right for a quick status change.</span><button class="module-first-tip-close" title="Dismiss" aria-label="Dismiss hint">✕</button>`;
-      tip.querySelector('.module-first-tip-close').addEventListener('click', () => {
-        localStorage.setItem('sw_tip_dismissed', '1');
-        tip.remove();
-      });
-      groups.appendChild(tip);
-    }
-
-    for (const group of module.groups) {
-      groups.appendChild(this._renderGroup(group));
-    }
-
-    // Custom Checks module: toolbar + empty state
-    if (module.id === 'custom-checks') {
-      // Toolbar at top
-      const toolbar = document.createElement('div');
-      toolbar.className = 'custom-checks-toolbar';
-      const totalChecks = module.groups.reduce((n, g) => n + g.items.length, 0);
-      toolbar.innerHTML = `
-        <span class="custom-checks-toolbar-label">${totalChecks > 0 ? `${totalChecks} custom check${totalChecks !== 1 ? 's' : ''} across ${module.groups.length} group${module.groups.length !== 1 ? 's' : ''}` : 'No checks yet — add your own below.'}</span>
-        <div class="custom-checks-toolbar-actions">
-          <button class="btn-toolbar-primary" id="btn-add-custom-check">+ Add Check</button>
-        </div>
-      `;
-      toolbar.querySelector('#btn-add-custom-check').addEventListener('click', () => this._openCustomCheckModal());
-      groups.insertBefore(toolbar, groups.firstChild);
-
-      // Empty state
-      if (module.groups.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'custom-checks-empty';
-        empty.innerHTML = `
-          <div class="custom-checks-empty-icon">✏️</div>
-          <div class="custom-checks-empty-title">No custom checks yet</div>
-          <div class="custom-checks-empty-sub">Build your own checklist — add items for targets, techniques, or anything not covered by the built-in modules.</div>
-          <button class="btn-toolbar-primary">+ Add your first check</button>
-        `;
-        empty.querySelector('button').addEventListener('click', () => this._openCustomCheckModal());
-        groups.appendChild(empty);
-      }
-    }
-
-    this._applyFilters();
-  }
-
-  _renderGroup(group) {
-    const container = document.createElement('div');
-    container.className = 'checklist-group';
-    container.dataset.groupId = group.id;
-
-    const isConsultant = this.state.currentType === 'consultant';
-    const notStartedVal = isConsultant ? 'not-assessed' : 'not-started';
-    const negativeVal   = isConsultant ? 'not-compliant' : 'vulnerable';
-    const positiveVal   = isConsultant ? 'compliant' : 'not-vulnerable';
-
-    let completedCount = 0, negCount = 0, posCount = 0;
-    for (const i of group.items) {
-      const s = (this.state.itemStates[i.id] || {}).status || notStartedVal;
-      if (s !== notStartedVal && s !== 'not-started') completedCount++;
-      if (s === negativeVal || s === 'vulnerable') negCount++;
-      else if (s === positiveVal || s === 'not-vulnerable') posCount++;
-    }
-    const pct = group.items.length > 0 ? (completedCount / group.items.length) * 100 : 0;
-
-    const groupStatBits = [
-      negCount > 0 ? `<span class="group-stat"><span class="group-stat-dot" style="background:${STATUS_COLORS[negativeVal]||STATUS_COLORS['vulnerable']}"></span>${negCount} ${isConsultant ? 'gaps' : 'vuln'}</span>` : '',
-      posCount > 0 ? `<span class="group-stat"><span class="group-stat-dot" style="background:${STATUS_COLORS[positiveVal]||STATUS_COLORS['not-vulnerable']}"></span>${posCount} ok</span>` : '',
-    ].filter(Boolean).join('');
-
-    // Sort items based on current sort order
-    let items = [...group.items];
-    const sortOrder = { critical:0, high:1, medium:2, low:3, info:4 };
-    const statusOrder = { 'vulnerable':0, 'not-compliant':0, 'in-progress':1, 'cannot-verify':2, 'partially-compliant':2, 'not-started':3, 'not-assessed':3, 'not-in-scope':4, 'not-applicable':4, 'not-vulnerable':5, 'compliant':5 };
-    if (this.state.sortOrder === 'severity') {
-      items.sort((a, b) => {
-        const sa = (this.state.itemStates[a.id]||{}).severityOverride || a.severity || 'info';
-        const sb = (this.state.itemStates[b.id]||{}).severityOverride || b.severity || 'info';
-        return (sortOrder[sa]??5) - (sortOrder[sb]??5);
-      });
-    } else if (this.state.sortOrder === 'status') {
-      items.sort((a, b) => {
-        const sa = (this.state.itemStates[a.id]||{}).status || notStartedVal;
-        const sb = (this.state.itemStates[b.id]||{}).status || notStartedVal;
-        return (statusOrder[sa]??9) - (statusOrder[sb]??9);
-      });
-    } else if (this.state.sortOrder === 'findings') {
-      items.sort((a, b) => {
-        const fa = (this.state.itemStates[a.id]||{}).isFinding ? 0 : 1;
-        const fb = (this.state.itemStates[b.id]||{}).isFinding ? 0 : 1;
-        return fa - fb;
-      });
-    }
-
-    const isCustomGroup = group.id.startsWith('custom-group');
-
-    const header = document.createElement('div');
-    // Restore collapse state
-    const isCollapsed = !!this.state.collapseStates[group.id];
-    header.className = `group-header${isCollapsed ? ' collapsed' : ''}`;
-    header.innerHTML = `
-      <span class="group-header-title">${escHTML(group.name)}</span>
-      ${groupStatBits ? `<span class="group-stat-row">${groupStatBits}</span>` : ''}
-      <span class="group-header-count">${completedCount}/${group.items.length}</span>
-      ${isCustomGroup ? `<button class="custom-group-add-btn" title="Add check to this group" aria-label="Add check to ${escHTML(group.name)}">+ Add</button><button class="custom-group-del-btn" title="Delete this group" aria-label="Delete group">🗑</button>` : ''}
-      <span class="group-chevron">▾</span>
-    `;
-
-    const progressBar = document.createElement('div');
-    progressBar.className = 'group-progress';
-    progressBar.innerHTML = `<div class="group-progress-fill" style="width:${pct}%"></div>`;
-
-    const itemsContainer = document.createElement('div');
-    itemsContainer.className = `group-items${isCollapsed ? ' collapsed' : ''}`;
-    itemsContainer.dataset.groupId = group.id;
-
-    for (const item of items) {
-      itemsContainer.appendChild(this._renderItem(item));
-    }
-
-    header.addEventListener('click', (e) => {
-      if (e.target.closest('.custom-group-add-btn') || e.target.closest('.custom-group-del-btn')) return;
-      const nowCollapsed = header.classList.toggle('collapsed');
-      itemsContainer.classList.toggle('collapsed', nowCollapsed);
-      // Persist collapse state
-      this.state.collapseStates[group.id] = nowCollapsed;
-      this._saveToStorage();
-    });
-
-    if (isCustomGroup) {
-      const addBtn = header.querySelector('.custom-group-add-btn');
-      const delBtn = header.querySelector('.custom-group-del-btn');
-      if (addBtn) addBtn.addEventListener('click', (e) => { e.stopPropagation(); this._openCustomCheckModal(group.id); });
-      if (delBtn) delBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (group.items.length > 0 && !confirm(`Delete group "${group.name}" and all ${group.items.length} check(s) inside?`)) return;
-        this._deleteCustomGroup(group.id);
-      });
-    }
-
-    container.appendChild(header);
-    container.appendChild(progressBar);
-    container.appendChild(itemsContainer);
-    return container;
-  }
-
-  _renderItem(item) {
-    const ist = this.state.itemStates[item.id] || {};
-    const isConsultant = this.state.currentType === 'consultant';
-    const defaultStatus = isConsultant ? 'not-assessed' : 'not-started';
-    const status = ist.status || defaultStatus;
-    const sev = ist.severityOverride || item.severity;
-    const outOfScope = ist.outOfScope || false;
-
-    const el = document.createElement('div');
-    let classes = 'checklist-item';
-    if (ist.isFinding) classes += ' is-finding';
-    if (outOfScope) classes += ' is-out-of-scope';
-    el.className = classes;
-    el.dataset.itemId = item.id;
-    el.dataset.status = status;
-    el.dataset.severity = sev || '';
-    el.dataset.tags = (item.tags || []).join(',');
-    el.dataset.isFinding = ist.isFinding ? '1' : '0';
-
-    const statusChips = this._buildStatusChips(item.id, status);
-    const sevBadge = sev ? `<span class="sev-badge sev-${sev}">${sev.toUpperCase()}</span>` : '';
-    const tagBadges = (item.tags || []).slice(0, 3).map(t => `<span class="badge badge-tag">${escHTML(t)}</span>`).join('');
-    const findingBadge = ist.isFinding ? `<span class="badge badge-finding">Finding</span>` : '';
-    const scopeBadge = outOfScope ? `<span class="badge badge-out-of-scope">Out of scope</span>` : '';
-    const lastNote = Array.isArray(ist.notes) && ist.notes.length > 0 ? ist.notes[ist.notes.length - 1] : null;
-    const notePreview = lastNote ? `<div class="item-note-preview">📝 ${escHTML(lastNote.text.slice(0, 100))}${lastNote.text.length > 100 ? '…' : ''}</div>` : '';
-
-    const customBadge = item._custom ? `<span class="badge-custom">Custom</span>` : '';
-    const customControls = item._custom
-      ? `<div class="custom-item-controls">
-           <button class="custom-item-edit-btn" title="Edit this check" data-item-id="${escHTML(item.id)}">Edit</button>
-           <button class="custom-item-del-btn" title="Delete this check" data-item-id="${escHTML(item.id)}">Delete</button>
-         </div>`
-      : '';
-
-    el.innerHTML = `
-      <div class="item-status-col">
-        <div class="status-dot status-${status}"></div>
-      </div>
-      <div class="item-body">
-        <div class="item-title-row">
-          <span class="item-title">${escHTML(item.title)}</span>
-          ${customBadge}${sevBadge}${findingBadge}${scopeBadge}
-        </div>
-        <div class="item-tags">${tagBadges}</div>
-        <div class="item-desc">${escHTML(item.description.slice(0, 120))}${item.description.length > 120 ? '…' : ''}</div>
-        ${notePreview}
-      </div>
-      <div class="item-actions">
-        ${statusChips}
-        ${customControls}
-      </div>
-    `;
-
-    // Open panel on row click
-    el.addEventListener('click', (e) => {
-      if (e.target.closest('.item-actions')) return;
-      this._openPanel(item);
-    });
-
-    // Custom item edit/delete buttons
-    if (item._custom) {
-      el.querySelector('.custom-item-edit-btn')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this._openCustomCheckModal(null, item);
-      });
-      el.querySelector('.custom-item-del-btn')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (!confirm(`Delete "${item.title}"?`)) return;
-        this._deleteCustomItem(item.id);
-      });
-    }
-
-    return el;
-  }
-
-  _buildStatusChips(itemId, currentStatus) {
-    const statuses = this._getStatusesForType();
-    const chips = statuses.map(s => {
-      const isActive = s.value === currentStatus;
-      return `<button class="status-chip chip-${s.value}${isActive ? ' active-chip' : ''}" data-item-id="${itemId}" data-status="${s.value}" title="${escHTML(s.label)}">${escHTML(s.label)}</button>`;
-    }).join('');
-    return `<div class="item-status-chips">${chips}</div>`;
-  }
-
-  _insertNoteFormat(fmt) {
-    const ta = document.getElementById('panel-notes-input');
-    if (!ta) return;
-    const start = ta.selectionStart;
-    const end   = ta.selectionEnd;
-    const sel   = ta.value.substring(start, end);
-    const pre   = ta.value.substring(0, start);
-    const post  = ta.value.substring(end);
-
-    let insert, cursorOffset;
-
-    if (fmt === 'bold') {
-      insert = sel ? `**${sel}**` : '****';
-      cursorOffset = sel ? insert.length : 2;
-    } else if (fmt === 'italic') {
-      insert = sel ? `*${sel}*` : '**';
-      cursorOffset = sel ? insert.length : 1;
-    } else if (fmt === 'code') {
-      insert = sel ? `\`${sel}\`` : '``';
-      cursorOffset = sel ? insert.length : 1;
-    } else if (fmt === 'bullet') {
-      if (sel && sel.includes('\n')) {
-        // Multi-line: prefix each line with "- "
-        insert = sel.split('\n').map(l => `- ${l}`).join('\n');
-        cursorOffset = insert.length;
-      } else {
-        // Single line: go to line start and prepend "- "
-        const lineStart = pre.lastIndexOf('\n') + 1;
-        const linePrefix = pre.substring(lineStart);
-        const realPre = pre.substring(0, lineStart);
-        insert = `- ${linePrefix}${sel}`;
-        ta.value = realPre + insert + post;
-        ta.selectionStart = ta.selectionEnd = lineStart + insert.length;
-        ta.focus();
-        ta.dispatchEvent(new Event('input'));
-        return;
-      }
-    }
-
-    ta.value = pre + insert + post;
-    ta.selectionStart = ta.selectionEnd = start + cursorOffset;
-    ta.focus();
-    ta.dispatchEvent(new Event('input'));
-  }
-
-  // ── Notes thread helpers ──────────────────────────────────────────────────
-
-  _formatNoteTs(isoStr) {
-    if (!isoStr) return '';
-    try {
-      const d = new Date(isoStr);
-      const date = d.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' });
-      const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      return `${date} ${time}`;
-    } catch (_) { return ''; }
-  }
-
-  _addNoteEntry() {
-    const ta = document.getElementById('panel-notes-input');
-    const text = ta.value.trim();
-    if (!text) return;
-    this._panelNotes.push({ text, ts: new Date().toISOString() });
-    ta.value = '';
-    ta.style.height = '';
-    this._renderNotesThread();
-    this._applyPanelChanges();
-  }
-
-  _renderNotesThread() {
-    const thread = document.getElementById('panel-notes-thread');
-    if (!thread) return;
-    if (this._panelNotes.length === 0) {
-      thread.innerHTML = '';
-      return;
-    }
-    thread.innerHTML = this._panelNotes.map((entry, idx) => `
-      <div class="note-entry" data-idx="${idx}">
-        <div class="note-entry-header">
-          <span class="note-entry-ts">${escHTML(this._formatNoteTs(entry.ts))}</span>
-          <button class="note-entry-delete" data-idx="${idx}" title="Delete this note">✕</button>
-        </div>
-        <div class="note-entry-text">${escHTML(entry.text)}</div>
-      </div>`).join('');
-    thread.querySelectorAll('.note-entry-delete').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const i = parseInt(btn.dataset.idx, 10);
-        this._panelNotes.splice(i, 1);
-        this._renderNotesThread();
-        this._applyPanelChanges();
-      });
-    });
-    // Scroll to bottom to show latest entry
-    thread.scrollTop = thread.scrollHeight;
-  }
-
-  // ── CVE chip helpers ──────────────────────────────────────────────────────
-
-  _addCveChip(raw) {
-    const val = raw.trim().replace(/,$/, '').trim().toUpperCase();
-    if (!val) return;
-    // Accept with or without CVE- prefix; normalize
-    const cve = val.startsWith('CVE-') ? val : `CVE-${val}`;
-    if (this._panelCves.includes(cve)) return; // no duplicates
-    this._panelCves.push(cve);
-    this._renderCveChips();
-    this._applyPanelChanges();
-  }
-
-  _renderCveChips() {
-    const wrap = document.getElementById('panel-cve-chips');
-    if (!wrap) return;
-    wrap.innerHTML = this._panelCves.map((cve, idx) =>
-      `<span class="cve-chip">${escHTML(cve)}<button class="cve-chip-remove" data-idx="${idx}" title="Remove">✕</button></span>`
-    ).join('');
-    wrap.querySelectorAll('.cve-chip-remove').forEach(btn => {
-      btn.addEventListener('click', () => {
-        this._panelCves.splice(parseInt(btn.dataset.idx, 10), 1);
-        this._renderCveChips();
-        this._applyPanelChanges();
-      });
-    });
-  }
-
-  // ── Item State ────────────────────────────────────────────────────────────
-
-  _updateItemState(itemId, field, value) {
-    if (!this.state.itemStates[itemId]) {
-      const defaultStatus = this.state.currentType === 'consultant' ? 'not-assessed' : 'not-started';
-      this.state.itemStates[itemId] = { status: defaultStatus, notes: [], evidence: '', cves: [], severityOverride: null, isFinding: false, outOfScope: false };
-    }
-    this.state.itemStates[itemId][field] = value;
-    this.state.itemStates[itemId].updatedAt = new Date().toISOString();
-    if (this.state.storageMode === 'session') this._sessionDirty = true;
-    this._saveToStorage();
-  }
-
-  // ── Panel ─────────────────────────────────────────────────────────────────
-
-  _openPanel(item) {
-    this.panelItemId = item.id;
-    const ist = this.state.itemStates[item.id] || {};
-    const isConsultant = this.state.currentType === 'consultant';
-    const defaultStatus = isConsultant ? 'not-assessed' : 'not-started';
-
-    document.getElementById('panel-title').textContent = item.title;
-    document.getElementById('panel-description').textContent = item.description;
-
-    // Notes thread
-    this._panelNotes = Array.isArray(ist.notes) ? [...ist.notes] : [];
-    this._renderNotesThread();
-
-    // CVE chips
-    this._panelCves = Array.isArray(ist.cves) ? [...ist.cves] : [];
-    this._renderCveChips();
-
-    // Status — use context-appropriate status list
-    const statuses = this._getStatusesForType();
-    const currentStatus = ist.status || defaultStatus;
-    const statusSel = document.getElementById('panel-status');
-    statusSel.innerHTML = statuses.map(s =>
-      `<option value="${s.value}"${currentStatus === s.value ? ' selected' : ''}>${s.label}</option>`
-    ).join('');
-    statusSel.className = `status-select panel-status ss-${currentStatus}`;
-    statusSel.addEventListener('change', (e) => {
-      statusSel.className = `status-select panel-status ss-${e.target.value}`;
-    });
-
-    // Severity override
-    const sevSel = document.getElementById('panel-severity');
-    sevSel.value = ist.severityOverride || '';
-
-    // Text fields
-    document.getElementById('panel-notes-input').value = '';
-    document.getElementById('panel-evidence').value = ist.evidence || '';
-
-    // Finding checkbox
-    document.getElementById('panel-is-finding').checked = ist.isFinding || false;
-
-    // Out of scope checkbox
-    const outOfScopeEl = document.getElementById('panel-out-of-scope');
-    if (outOfScopeEl) outOfScopeEl.checked = ist.outOfScope || false;
-
-    // Tags
-    const tagsEl = document.getElementById('panel-tags');
-    tagsEl.innerHTML = (item.tags || []).map(t => `<span class="badge badge-tag">${t}</span>`).join('') || '<span class="text-muted text-small">None</span>';
-
-    // Frameworks
-    const fwEl = document.getElementById('panel-frameworks');
-    fwEl.innerHTML = (item.frameworks || []).map(f => `<span class="badge badge-framework">${f}</span>`).join('') || '<span class="text-muted text-small">None</span>';
-
-    // Show panel
-    document.getElementById('panel-overlay').style.display = 'block';
-    document.getElementById('item-panel').style.display = 'flex';
-  }
-
-  _closePanel() {
-    this._applyPanelChanges();
-    document.getElementById('panel-overlay').style.display = 'none';
-    document.getElementById('item-panel').style.display = 'none';
-    this.panelItemId = null;
-  }
-
-  _applyPanelChanges() {
-    if (!this.panelItemId) return;
-    const id = this.panelItemId;
-
-    const status = document.getElementById('panel-status').value;
-    const severityOverride = document.getElementById('panel-severity').value || null;
-    const evidence = document.getElementById('panel-evidence').value.trim();
-    const isFinding = document.getElementById('panel-is-finding').checked;
-    const outOfScope = document.getElementById('panel-out-of-scope')?.checked || false;
-
-    this._updateItemState(id, 'status', status);
-    this._updateItemState(id, 'severityOverride', severityOverride);
-    this._updateItemState(id, 'notes', [...this._panelNotes]);
-    this._updateItemState(id, 'evidence', evidence);
-    this._updateItemState(id, 'cves', [...this._panelCves]);
-    this._updateItemState(id, 'isFinding', isFinding);
-    this._updateItemState(id, 'outOfScope', outOfScope);
-
-    // Update the row in the DOM
-    const row = document.querySelector(`.checklist-item[data-item-id="${id}"]`);
-    if (row) {
-      row.dataset.status = status;
-      row.dataset.isFinding = isFinding ? '1' : '0';
-      row.classList.toggle('is-finding', isFinding);
-      row.classList.toggle('is-out-of-scope', outOfScope);
-
-      const dot = row.querySelector('.status-dot');
-      if (dot) dot.className = `status-dot status-${status}`;
-
-      // Update chips
-      const chipsEl = row.querySelector('.item-status-chips');
-      if (chipsEl) {
-        chipsEl.querySelectorAll('.status-chip').forEach(chip => {
-          chip.classList.toggle('active-chip', chip.dataset.status === status);
-        });
-      }
-
-      const lastNoteText = this._panelNotes.length > 0 ? this._panelNotes[this._panelNotes.length - 1].text : '';
-      const notePreview = row.querySelector('.item-note-preview');
-      if (lastNoteText) {
-        const previewText = `📝 ${lastNoteText.slice(0, 100)}${lastNoteText.length > 100 ? '…' : ''}`;
-        if (notePreview) notePreview.textContent = previewText;
-        else {
-          const nb = document.createElement('div');
-          nb.className = 'item-note-preview';
-          nb.textContent = previewText;
-          row.querySelector('.item-body').appendChild(nb);
-        }
-      } else if (notePreview) notePreview.remove();
-    }
-
-    this._updateProgress(MODULE_MAP[this.state.currentModuleId]);
-    this._renderSidebar();
-  }
-
-  // ── Progress ──────────────────────────────────────────────────────────────
-
-  getModuleProgress(module) {
-    const isConsultant = module.type === 'consultant';
-    const counts = { total: 0, notStarted: 0, inProgress: 0, compliant: 0, vulnerable: 0, notInScope: 0, cannotVerify: 0 };
-    for (const group of module.groups) {
-      for (const item of group.items) {
-        counts.total++;
-        const status = (this.state.itemStates[item.id] || {}).status || (isConsultant ? 'not-assessed' : 'not-started');
-        if (status === 'not-started' || status === 'not-assessed') counts.notStarted++;
-        else if (status === 'in-progress') counts.inProgress++;
-        else if (status === 'not-vulnerable' || status === 'compliant') counts.compliant++;
-        else if (status === 'vulnerable' || status === 'not-compliant') counts.vulnerable++;
-        else if (status === 'not-in-scope' || status === 'not-applicable') counts.notInScope++;
-        else if (status === 'cannot-verify' || status === 'partially-compliant') counts.cannotVerify++;
-      }
-    }
-    return counts;
-  }
-
-  _updateProgress(module) {
-    if (!module) return;
-    const progress = this.getModuleProgress(module);
-    const progressEl = document.getElementById('sidebar-progress');
-    const fill = document.getElementById('progress-bar-fill');
-    const fraction = document.getElementById('progress-fraction');
-    const stats = document.getElementById('progress-stats');
-
-    progressEl.style.display = 'block';
-    const assessed = progress.total - progress.notStarted;
-    const pct = progress.total > 0 ? (assessed / progress.total) * 100 : 0;
-    fraction.textContent = `${assessed}/${progress.total}`;
-
-    // Stacked colour segments: vulnerable / compliant / in-progress / cannot-verify
-    const segments = [
-      { count: progress.vulnerable,   color: STATUS_COLORS['vulnerable']    },
-      { count: progress.compliant,    color: STATUS_COLORS['not-vulnerable'] },
-      { count: progress.inProgress,   color: STATUS_COLORS['in-progress']   },
-      { count: progress.cannotVerify, color: STATUS_COLORS['cannot-verify'] },
-      { count: progress.notInScope,   color: STATUS_COLORS['not-in-scope']  },
-    ].filter(s => s.count > 0);
-    fill.style.cssText = `width:${pct}%;height:100%;display:flex;background:none;border-radius:2px;transition:width .35s ease;overflow:hidden;`;
-    fill.innerHTML = segments.map(s =>
-      `<div style="flex:${s.count};background:${s.color};"></div>`
-    ).join('');
-
-    stats.innerHTML = [
-      { label: 'Vuln', count: progress.vulnerable, color: STATUS_COLORS['vulnerable'] },
-      { label: 'OK', count: progress.compliant, color: STATUS_COLORS['not-vulnerable'] },
-      { label: 'WIP', count: progress.inProgress, color: STATUS_COLORS['in-progress'] },
-      { label: '?', count: progress.cannotVerify, color: STATUS_COLORS['cannot-verify'] },
-    ].filter(s => s.count > 0).map(s =>
-      `<div class="progress-stat"><div class="progress-stat-dot" style="background:${s.color}"></div>${s.count} ${s.label}</div>`
-    ).join('');
-
-    // Update module header stats
-    const headerStats = document.querySelector('.module-header-stats');
-    if (headerStats) {
-      const pills = headerStats.querySelectorAll('.stat-pill');
-      const values = [progress.vulnerable, progress.inProgress, progress.compliant, progress.notStarted, progress.cannotVerify];
-      pills.forEach((pill, i) => {
-        const text = pill.textContent.trim().split(' ');
-        if (values[i] !== undefined) {
-          pill.childNodes[pill.childNodes.length - 1].textContent = ` ${text[text.length - 1]}`;
-          pill.innerHTML = `<span class="stat-pill-dot" style="background:${pill.querySelector('.stat-pill-dot').style.background}"></span>${values[i]} ${text[text.length - 1]}`;
-        }
-      });
-    }
-
-    // Module completion celebration (toast once per module load)
-    if (progress.notStarted === 0 && progress.total > 0 && !this._moduleCompleteToasted) {
-      this._moduleCompleteToasted = true;
-      const f = progress.vulnerable;
-      this._showToast(
-        f > 0 ? `All items assessed — ${f} finding${f !== 1 ? 's' : ''} flagged` : 'All items assessed — no findings',
-        'success'
-      );
-    }
-  }
-
-  // ── Filters ───────────────────────────────────────────────────────────────
-
-  _populateTagFilter() {
-    const sel = document.getElementById('filter-tag');
-    const tags = getAllTags();
-    tags.forEach(tag => {
-      const opt = document.createElement('option');
-      opt.value = tag;
-      opt.textContent = tag;
-      sel.appendChild(opt);
-    });
-  }
-
-  _applyFilters() {
-    const { status, severity, tag, search, findingsOnly } = this.state.filters;
-    const rows = document.querySelectorAll('.checklist-item');
-    const searchLower = search.toLowerCase();
-
-    let visible = 0;
-    const total = rows.length;
-
-    rows.forEach(row => {
-      let show = true;
-      const rowStatus = row.dataset.status;
-      const rowSeverity = row.dataset.severity;
-      const rowTags = row.dataset.tags || '';
-      const rowFinding = row.dataset.isFinding === '1';
-      const rowTitle = row.querySelector('.item-title')?.textContent?.toLowerCase() || '';
-      const rowDesc = row.querySelector('.item-desc')?.textContent?.toLowerCase() || '';
-
-      if (status !== 'all' && rowStatus !== status) show = false;
-      if (severity !== 'all' && rowSeverity !== severity) show = false;
-      if (tag !== 'all' && !rowTags.split(',').includes(tag)) show = false;
-      if (searchLower && !rowTitle.includes(searchLower) && !rowDesc.includes(searchLower)) show = false;
-      if (findingsOnly && !rowFinding) show = false;
-
-      row.classList.toggle('filtered-out', !show);
-      if (show) visible++;
-    });
-
-    // Hide groups with no visible items
-    document.querySelectorAll('.checklist-group').forEach(group => {
-      const hasVisible = group.querySelectorAll('.checklist-item:not(.filtered-out)').length > 0;
-      group.style.display = hasVisible ? '' : 'none';
-    });
-
-    // Update result count
-    const countEl = document.getElementById('filter-count');
-    if (countEl && total > 0) {
-      countEl.textContent = visible === total ? `${total} items` : `${visible} / ${total} items`;
-    }
-
-    // Empty state
-    const groups = document.getElementById('checklist-groups');
-    if (groups) {
-      let emptyEl = document.getElementById('filter-empty-msg');
-      if (visible === 0 && total > 0) {
-        if (!emptyEl) {
-          emptyEl = document.createElement('div');
-          emptyEl.id = 'filter-empty-msg';
-          emptyEl.className = 'filter-empty-state';
-          emptyEl.innerHTML = '<p><strong>No items match the current filters.</strong></p><p>Try adjusting or clearing the filters above.</p>';
-          groups.parentNode.insertBefore(emptyEl, groups.nextSibling);
-        }
-        emptyEl.style.display = '';
-      } else if (emptyEl) {
-        emptyEl.style.display = 'none';
-      }
-    }
-
-    this._updateFilterBadge();
-  }
-
-  _updateFilterBadge() {
-    const { status, severity, tag, search, findingsOnly } = this.state.filters;
-    let count = 0;
-    if (status !== 'all') count++;
-    if (severity !== 'all') count++;
-    if (tag !== 'all') count++;
-    if (search) count++;
-    if (findingsOnly) count++;
-
-    const badge = document.getElementById('filter-active-badge');
-    if (badge) {
-      badge.textContent = count;
-      badge.style.display = count > 0 ? 'inline-flex' : 'none';
-    }
-
-    // Visual active state on inputs
-    const statusSel = document.getElementById('filter-status');
-    if (statusSel) statusSel.classList.toggle('filter-active', status !== 'all');
-    const sevSel = document.getElementById('filter-severity');
-    if (sevSel) sevSel.classList.toggle('filter-active', severity !== 'all');
-    const tagSel = document.getElementById('filter-tag');
-    if (tagSel) tagSel.classList.toggle('filter-active', tag !== 'all');
-    const searchIn = document.getElementById('filter-search');
-    if (searchIn) searchIn.classList.toggle('filter-active', !!search);
-    const findingsChk = document.getElementById('filter-findings-only');
-    if (findingsChk) findingsChk.parentElement?.classList.toggle('filter-active-label', findingsOnly);
-
-    // Clear button visibility
-    const clearBtn = document.getElementById('btn-filter-clear');
-    if (clearBtn) clearBtn.style.visibility = count > 0 ? 'visible' : 'hidden';
-  }
-
-  _clearFilters() {
-    this.state.filters = { status: 'all', severity: 'all', tag: 'all', search: '', findingsOnly: false };
-    document.getElementById('filter-status').value = 'all';
-    document.getElementById('filter-severity').value = 'all';
-    document.getElementById('filter-tag').value = 'all';
-    document.getElementById('filter-search').value = '';
-    document.getElementById('filter-findings-only').checked = false;
-    this._applyFilters();
-  }
-
-  _toggleFilterBar() {
-    this.state.filterBarOpen = !this.state.filterBarOpen;
-    document.getElementById('filter-bar').classList.toggle('open', this.state.filterBarOpen);
-    document.querySelector('.layout').classList.toggle('filter-open', this.state.filterBarOpen);
-    document.getElementById('btn-filter-toggle').classList.toggle('active', this.state.filterBarOpen);
-  }
-
-  // ── Metadata modal ────────────────────────────────────────────────────────
-
-  _openMetaModal() {
-    const m = this.state.metadata;
-    document.getElementById('meta-project-name').value = m.projectName || '';
-    document.getElementById('meta-client').value = m.client || '';
-    document.getElementById('meta-assessor').value = m.assessor || '';
-    document.getElementById('meta-version').value = m.version || '1.0';
-    document.getElementById('meta-start-date').value = m.startDate || '';
-    document.getElementById('meta-end-date').value = m.endDate || '';
-    document.getElementById('meta-scope').value = m.scope || '';
-    document.getElementById('meta-exclusions').value = m.exclusions || '';
-
-    // Sync classification picker buttons
-    const classifVal = m.classification || 'CONFIDENTIAL';
-    document.getElementById('meta-classification').value = classifVal;
-    document.querySelectorAll('.classif-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.value === classifVal);
-    });
-
-    document.getElementById('modal-project').style.display = 'flex';
-  }
-
-  _saveMetaModal() {
-    this.state.metadata = {
-      projectName: document.getElementById('meta-project-name').value.trim() || 'Untitled Project',
-      client: document.getElementById('meta-client').value.trim() || 'Client',
-      assessor: document.getElementById('meta-assessor').value.trim(),
-      classification: document.getElementById('meta-classification').value,
-      version: document.getElementById('meta-version').value.trim() || '1.0',
-      startDate: document.getElementById('meta-start-date').value,
-      endDate: document.getElementById('meta-end-date').value,
-      scope: document.getElementById('meta-scope').value.trim(),
-      exclusions: document.getElementById('meta-exclusions').value.trim(),
-    };
-    this._syncMetaToUI();
-    this._saveToStorage();
-    this._updateDocTitle();
-    document.getElementById('modal-project').style.display = 'none';
-    this._showToast('Project metadata saved', 'success');
-  }
-
-  _syncMetaToUI() {
-    const m = this.state.metadata;
-
-    // Inline-editable fields (contenteditable)
-    document.getElementById('project-name-display').textContent = m.projectName;
-    document.getElementById('project-client-display').textContent = m.client;
-
-    // Classification badge
-    const classifEl = document.getElementById('project-classification-display');
-    if (classifEl) {
-      classifEl.textContent = m.classification || 'CONFIDENTIAL';
-      classifEl.dataset.value = m.classification || 'CONFIDENTIAL';
-    }
-
-    // Date range
-    const datesEl = document.getElementById('project-dates-display');
-    if (datesEl) {
-      if (m.startDate || m.endDate) {
-        const fmt = d => d
-          ? new Date(d + 'T12:00:00').toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
-          : '?';
-        datesEl.textContent = `${fmt(m.startDate)} – ${fmt(m.endDate)}`;
-      } else {
-        datesEl.textContent = '';
-      }
-    }
-  }
-
-  // ── Report export ─────────────────────────────────────────────────────────
-
-  _getReportOptions() {
-    this._syncCustomModule();
-    const type = this.state.currentType === 'consultant' ? 'consultant' : 'pentest';
-    const mods = this.state.modeSelected
-      ? (MODULES_BY_TYPE[this.state.currentType] || ALL_MODULES)
-      : ALL_MODULES;
-    return { type, includedModuleIds: mods.map(m => m.id) };
-  }
-
-  _exportHTML() {
-    this.reportGen.generateHTML(this._getReportOptions());
-    this._showToast('HTML report downloaded', 'success');
-  }
-
-  _exportReport() {
-    this.reportGen.generatePDF(this._getReportOptions());
-    this._showToast('Opening PDF report…', 'success');
-  }
-
-  // ── Import / Export ────────────────────────────────────────────────────────
-
-  _exportJSON() {
-    const data = {
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      appVersion: '1.0',
-      metadata: this.state.metadata,
-      itemStates: this.state.itemStates,
-      customGroups: this.state.customGroups,
-    };
-    const safeName = (this.state.metadata.projectName || 'secworkflow')
-      .replace(/[^a-zA-Z0-9_\-. ]/g, '_').replace(/\s+/g, '_').slice(0, 80).toLowerCase();
-    this._downloadFile(`${safeName}_${new Date().toISOString().slice(0,10)}.json`, JSON.stringify(data, null, 2), 'application/json');
-    this._sessionDirty = false; // user has a backup now
-    this._showToast('Exported JSON', 'success');
-  }
-
-  // Stage the file and show confirmation modal before overwriting
-  _stageImport(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      this._showToast('File too large (max 5 MB)', 'error');
-      event.target.value = '';
-      return;
-    }
-    this._pendingImportFile = file;
-    event.target.value = '';
-    document.getElementById('modal-import-confirm').style.display = 'flex';
-  }
-
-  _doImport() {
-    document.getElementById('modal-import-confirm').style.display = 'none';
-    const file = this._pendingImportFile;
-    this._pendingImportFile = null;
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = JSON.parse(e.target.result);
-        if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid structure');
-
-        if (data.metadata) {
-          this.state.metadata = { ...this.state.metadata, ...sanitiseMetadata(data.metadata) };
-        }
-
-        if (data.itemStates && typeof data.itemStates === 'object' && !Array.isArray(data.itemStates)) {
-          for (const [key, val] of Object.entries(data.itemStates)) {
-            if (typeof key === 'string' && key.length <= 200) {
-              this.state.itemStates[key] = sanitiseItemState(val);
-            }
-          }
-        }
-
-        if (Array.isArray(data.customGroups)) {
-          this.state.customGroups = data.customGroups;
-          this._syncCustomModule();
-        }
-
-        this._syncMetaToUI();
-        this._saveToStorage();
-        this._sessionDirty = false;
-        this._updateDocTitle();
-        if (this.state.currentModuleId) this._loadModule(this.state.currentModuleId);
-        this._renderSidebar();
-        this._showToast('Data imported successfully', 'success');
-      } catch (_) {
-        this._showToast('Invalid or malformed JSON file', 'error');
-      }
-    };
-    reader.readAsText(file);
-  }
-
-  _exportMarkdown() {
-    if (!this.state.currentModuleId) { this._showToast('Load a module first', 'info'); return; }
-    const module = MODULE_MAP[this.state.currentModuleId];
-    const progress = this.getModuleProgress(module);
-    let md = `# ${module.icon} ${module.name} — Checklist Export\n\n`;
-    md += `**Project:** ${this.state.metadata.projectName}  \n`;
-    md += `**Client:** ${this.state.metadata.client}  \n`;
-    md += `**Date:** ${new Date().toISOString().slice(0, 10)}\n\n`;
-    md += `**Progress:** ${progress.total - progress.notStarted}/${progress.total} assessed, ${progress.vulnerable} vulnerable\n\n`;
-
-    for (const group of module.groups) {
-      md += `## ${group.name}\n\n`;
-      for (const item of group.items) {
-        const ist = this.state.itemStates[item.id] || {};
-        const status = ist.status || 'not-started';
-        const statusLabel = STATUS_LABELS[status] || status;
-        const sev = ist.severityOverride || item.severity;
-
-        md += `### ${item.title}\n\n`;
-        md += `**Status:** ${statusLabel}`;
-        if (sev) md += ` | **Severity:** ${sev.toUpperCase()}`;
-        if (ist.isFinding) md += ` | 🔍 **Finding**`;
-        md += `\n\n`;
-        md += `${item.description}\n\n`;
-        if (ist.notes?.length > 0) { md += `**Notes:**\n`; ist.notes.forEach(e => { md += `- [${this._formatNoteTs(e.ts)}] ${e.text}\n`; }); md += '\n'; }
-        if (ist.evidence) md += `**Evidence:**\n\`\`\`\n${ist.evidence}\n\`\`\`\n\n`;
-        if (ist.cves?.length > 0) md += `**CVEs:** ${ist.cves.join(', ')}\n\n`;
-        if (item.tags?.length) md += `**Tags:** ${item.tags.join(', ')}\n\n`;
-        if (item.frameworks?.length) md += `**Frameworks:** ${item.frameworks.join(', ')}\n\n`;
-        md += `---\n\n`;
-      }
-    }
-
-    const name = `${module.name.replace(/\s+/g,'_').toLowerCase()}_checklist`;
-    this._downloadFile(`${name}.md`, md, 'text/markdown');
-    this._showToast('Exported Markdown', 'success');
-  }
-
-  // ── Utilities ─────────────────────────────────────────────────────────────
-
-  _downloadFile(filename, content, type) {
-    const blob = new Blob([content], { type });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  _showToast(message, type = 'info') {
-    const container = document.getElementById('toast-container');
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    toast.textContent = message;
-    toast.title = 'Click to dismiss';
-    toast.style.cursor = 'pointer';
-    container.appendChild(toast);
-
-    const dismiss = () => {
-      toast.style.opacity = '0';
-      toast.style.transition = 'opacity .15s';
-      setTimeout(() => toast.remove(), 180);
-    };
-    toast.addEventListener('click', dismiss);
-    setTimeout(dismiss, 3000);
-  }
+];
+
+/* ════════════════════════════════════════════════════
+   ALERT STATE
+════════════════════════════════════════════════════ */
+let activeAlerts = [];   // { id, sev, createdAt, acked }
+let currentSevFilter = 'ALL';
+let searchQuery = '';
+let lastAlertTime = null;
+let relTimeInterval = null;
+
+function rand(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ── Bootstrap ─────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  window.app = new SecWorkflowApp();
+function fmtUtc(d) {
+  const p = n => String(n).padStart(2,'0');
+  return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} UTC`;
+}
 
-  // Delegated click handler for status chips
-  document.getElementById('checklist-groups').addEventListener('click', (e) => {
-    const chip = e.target.closest('.status-chip');
-    if (!chip) return;
-    e.stopPropagation();
+function relTime(ts) {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 10)  return 'just now';
+  if (s < 60)  return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s/60)}m ago`;
+  return `${Math.floor(s/3600)}h ago`;
+}
 
-    const itemId = chip.dataset.itemId;
-    const newStatus = chip.dataset.status;
-    const row = chip.closest('.checklist-item');
-    if (!itemId || !newStatus) return;
+function generateAlert(forceSev) {
+  const template = rand(ALERTS);
+  const variant  = rand(template.variants);
+  const sev      = forceSev || template.sev;
+  const now      = new Date();
+  const id       = `a-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
 
-    window.app._updateItemState(itemId, 'status', newStatus);
+  const card = document.createElement('div');
+  card.className = `alert-card sev-${sev}`;
+  card.id = id;
+  card.dataset.sev = sev;
 
-    // Update all chips in this row
-    const chips = chip.closest('.item-status-chips');
-    if (chips) chips.querySelectorAll('.status-chip').forEach(c => {
-      c.classList.toggle('active-chip', c.dataset.status === newStatus);
-    });
+  card.innerHTML = `
+    <div class="alert-inner">
+      <div class="alert-top">
+        <span class="alert-icon">${template.icon}</span>
+        <div class="alert-top-mid">
+          <div class="alert-type">${escHtml(template.type)}</div>
+          <div class="alert-meta">
+            <span class="sev-badge ${sev}">${sev}</span>
+            <span class="alert-ts">${fmtUtc(now)}</span>
+            <span class="alert-rel" data-ts="${now.getTime()}">just now</span>
+          </div>
+        </div>
+        <div class="alert-btns">
+          <button class="btn-ack" data-id="${id}" title="Acknowledge — keeps alert in queue but marks it reviewed">ACK</button>
+          <button class="btn-dismiss" data-id="${id}" title="Dismiss alert">✕</button>
+        </div>
+      </div>
+      <div class="alert-desc">${escHtml(variant.desc)}</div>
+      <div class="alert-section-label">Assessment</div>
+      <div class="alert-interp">${escHtml(variant.interp)}</div>
+      <div class="alert-section-label">Immediate Actions</div>
+      <ul class="alert-actions-list">
+        ${variant.actions.map((a,i) => `
+          <li>
+            <span class="action-num">${i+1}</span>
+            <span>${escHtml(a)}</span>
+          </li>`).join('')}
+      </ul>
+    </div>`;
 
-    if (row) {
-      row.dataset.status = newStatus;
-      const dot = row.querySelector('.status-dot');
-      if (dot) dot.className = `status-dot status-${newStatus}`;
-    }
+  activeAlerts.push({ id, sev, createdAt: now.getTime(), acked: false });
+  lastAlertTime = now;
 
-    window.app._updateProgress(MODULE_MAP[window.app.state.currentModuleId]);
-    window.app._renderSidebar();
+  const queue = document.getElementById('alert-queue');
+  document.getElementById('empty-state').style.display = 'none';
+  queue.insertBefore(card, queue.firstChild);
+
+  applyFilters();
+  updateBadge();
+  updateSeverityCounts();
+  updateStatusBar();
+  updateLastAlert();
+
+  startRelTimeUpdates();
+}
+
+function simulateIncident() {
+  const delays = [0, 350, 700, 1100];
+  const sevs = ['CRITICAL', 'CRITICAL', 'HIGH', 'HIGH'];
+  delays.forEach((d, i) => setTimeout(() => generateAlert(sevs[i]), d));
+}
+
+/* ── ACK ─────────────────────────────────────────────────────────── */
+function ackAlert(id) {
+  const card = document.getElementById(id);
+  if (!card) return;
+  const entry = activeAlerts.find(a => a.id === id);
+  if (!entry) return;
+
+  if (entry.acked) {
+    card.classList.remove('is-acked');
+    entry.acked = false;
+  } else {
+    card.classList.add('is-acked');
+    entry.acked = true;
+  }
+  updateBadge();
+  updateStatusBar();
+}
+
+/* ── DISMISS ─────────────────────────────────────────────────────── */
+function dismissAlert(id) {
+  const card = document.getElementById(id);
+  if (!card) return;
+  card.classList.add('is-dismissed');
+  activeAlerts = activeAlerts.filter(a => a.id !== id);
+  setTimeout(() => { card.remove(); checkEmpty(); }, 300);
+  updateBadge();
+  updateSeverityCounts();
+  updateStatusBar();
+}
+
+function clearAlerts() {
+  document.querySelectorAll('.alert-card').forEach(c => c.remove());
+  activeAlerts = [];
+  updateBadge();
+  updateSeverityCounts();
+  updateStatusBar();
+  checkEmpty();
+}
+
+function checkEmpty() {
+  const has = document.querySelectorAll('.alert-card').length > 0;
+  document.getElementById('empty-state').style.display = has ? 'none' : 'flex';
+}
+
+/* ── FILTERS ─────────────────────────────────────────────────────── */
+function applyFilters() {
+  const q = searchQuery.toLowerCase();
+  document.querySelectorAll('.alert-card').forEach(card => {
+    const sevMatch = currentSevFilter === 'ALL' || card.dataset.sev === currentSevFilter;
+    const textMatch = !q || card.innerText.toLowerCase().includes(q);
+    card.dataset.hidden = String(!(sevMatch && textMatch));
+    card.style.display = (sevMatch && textMatch) ? '' : 'none';
+  });
+}
+
+document.getElementById('sev-filters').addEventListener('click', e => {
+  const btn = e.target.closest('.sev-filter');
+  if (!btn) return;
+  document.querySelectorAll('.sev-filter').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentSevFilter = btn.dataset.sev;
+  applyFilters();
+});
+
+document.getElementById('triage-search').addEventListener('input', e => {
+  searchQuery = e.target.value.trim();
+  applyFilters();
+});
+
+/* ── ALERT QUEUE DELEGATION ─────────────────────────────────────── */
+document.getElementById('alert-queue').addEventListener('click', e => {
+  const ackBtn  = e.target.closest('.btn-ack');
+  const disBtn  = e.target.closest('.btn-dismiss');
+  if (ackBtn) ackAlert(ackBtn.dataset.id);
+  if (disBtn) dismissAlert(disBtn.dataset.id);
+});
+
+/* ── GENERATE / SIMULATE ─────────────────────────────────────────── */
+document.getElementById('btn-generate').addEventListener('click', () => generateAlert());
+document.getElementById('btn-simulate').addEventListener('click', simulateIncident);
+document.getElementById('btn-clear').addEventListener('click', clearAlerts);
+
+/* ── BADGE & COUNTS ─────────────────────────────────────────────── */
+function updateBadge() {
+  const unacked = activeAlerts.filter(a => !a.acked).length;
+  const badge = document.getElementById('alert-badge');
+  badge.textContent = unacked > 0 ? unacked : '';
+}
+
+function updateSeverityCounts() {
+  const counts = { ALL: 0, CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+  activeAlerts.forEach(a => {
+    counts.ALL++;
+    if (counts[a.sev] !== undefined) counts[a.sev]++;
+  });
+  Object.entries(counts).forEach(([sev, n]) => {
+    const el = document.getElementById(`cnt-${sev}`);
+    if (el) el.textContent = n;
+  });
+}
+
+function updateStatusBar() {
+  const total    = activeAlerts.length;
+  const critical = activeAlerts.filter(a => a.sev === 'CRITICAL').length;
+  const high     = activeAlerts.filter(a => a.sev === 'HIGH').length;
+  const medium   = activeAlerts.filter(a => a.sev === 'MEDIUM').length;
+  const el = document.getElementById('sb-alert-summary');
+  if (total === 0) {
+    el.textContent = 'No alerts';
+    return;
+  }
+  const parts = [];
+  if (critical) parts.push(`${critical} CRITICAL`);
+  if (high)     parts.push(`${high} HIGH`);
+  if (medium)   parts.push(`${medium} MEDIUM`);
+  const rest = total - critical - high - medium;
+  if (rest > 0) parts.push(`${rest} other`);
+  el.textContent = parts.join(' · ');
+}
+
+function updateLastAlert() {
+  const wrap = document.getElementById('last-alert-wrap');
+  const el   = document.getElementById('last-alert-time');
+  if (!lastAlertTime) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'flex';
+  el.textContent = relTime(lastAlertTime.getTime());
+}
+
+/* ── RELATIVE TIMESTAMPS ─────────────────────────────────────────── */
+function updateRelTimes() {
+  document.querySelectorAll('.alert-rel[data-ts]').forEach(el => {
+    el.textContent = relTime(parseInt(el.dataset.ts, 10));
+  });
+  updateLastAlert();
+}
+
+function startRelTimeUpdates() {
+  if (relTimeInterval) return;
+  relTimeInterval = setInterval(updateRelTimes, 30000);
+}
+
+/* ════════════════════════════════════════════════════
+   IR PLAYBOOKS — ACCORDION
+════════════════════════════════════════════════════ */
+document.querySelectorAll('.pb-card .pb-header').forEach(h => {
+  h.addEventListener('click', () => h.closest('.pb-card').classList.toggle('open'));
+});
+
+/* ════════════════════════════════════════════════════
+   PENTEST REF — COLLAPSIBLE
+════════════════════════════════════════════════════ */
+function setRefCard(header, open) {
+  const body = header.closest('.ref-card').querySelector('.ref-body');
+  const chev = header.querySelector('.ref-chevron');
+  header.dataset.open = open ? 'true' : 'false';
+  body.style.display  = open ? 'block' : 'none';
+  chev.classList.toggle('open', open);
+}
+
+document.querySelectorAll('.ref-header').forEach(h => {
+  h.addEventListener('click', () => {
+    const isOpen = h.dataset.open === 'true';
+    setRefCard(h, !isOpen);
   });
 });
+
+document.getElementById('btn-expand-all').addEventListener('click', () => {
+  document.querySelectorAll('.ref-header').forEach(h => setRefCard(h, true));
+});
+document.getElementById('btn-collapse-all').addEventListener('click', () => {
+  document.querySelectorAll('.ref-header').forEach(h => setRefCard(h, false));
+});
+
+/* ════════════════════════════════════════════════════
+   THREAT MAP — TACTIC FILTER
+════════════════════════════════════════════════════ */
+document.getElementById('tactic-filters').addEventListener('click', e => {
+  const btn = e.target.closest('.tact-filter');
+  if (!btn) return;
+  document.querySelectorAll('.tact-filter').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const tactic = btn.dataset.tactic;
+  document.querySelectorAll('#threat-table tbody tr').forEach(row => {
+    const match = tactic === 'ALL' || row.dataset.tactic === tactic;
+    row.dataset.hidden = String(!match);
+    row.style.display = match ? '' : 'none';
+  });
+});
+
+/* ════════════════════════════════════════════════════
+   COPY TO CLIPBOARD
+════════════════════════════════════════════════════ */
+function showCopyToast() {
+  const toast = document.getElementById('copy-toast');
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 1500);
+}
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('code.copyable');
+  if (!el) return;
+  const text = el.textContent;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(showCopyToast).catch(() => {});
+  } else {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); showCopyToast(); } catch (_) {}
+    document.body.removeChild(ta);
+  }
+});
+
+/* ════════════════════════════════════════════════════
+   KEYBOARD SHORTCUTS
+════════════════════════════════════════════════════ */
+document.addEventListener('keydown', e => {
+  const tag = e.target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA') {
+    if (e.key === 'Escape') {
+      e.target.value = '';
+      searchQuery = '';
+      applyFilters();
+      e.target.blur();
+    }
+    return;
+  }
+
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+  if (e.key === 'n' || e.key === 'N') { generateAlert(); return; }
+  if (e.key === 'Escape') {
+    searchQuery = '';
+    currentSevFilter = 'ALL';
+    document.getElementById('triage-search').value = '';
+    document.querySelectorAll('.sev-filter').forEach(b => b.classList.remove('active'));
+    document.querySelector('.sev-filter[data-sev="ALL"]').classList.add('active');
+    applyFilters();
+    return;
+  }
+
+  const panels = ['triage','playbooks','pentest','threats','logs','grc'];
+  const idx = parseInt(e.key) - 1;
+  if (idx >= 0 && idx < panels.length) switchTab(panels[idx]);
+});
+
+/* ════════════════════════════════════════════════════
+   INIT
+════════════════════════════════════════════════════ */
+// Generate two starter alerts on load so the dashboard isn't empty
+setTimeout(() => generateAlert('HIGH'),     300);
+setTimeout(() => generateAlert('CRITICAL'), 700);
